@@ -1,9 +1,10 @@
-<<<<<<< HEAD
 <Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
   <Folder Name="/솔루션 항목/">
     <File Path="test.c" />
   </Folder>
+  <Project Path="Project1/Project1.vcxproj" Id="08dd8ebe-8bdd-49a6-8dbb-a367600e9134" />
 </Solution>
-=======
-<Solution />
->>>>>>> bbf6c535bb5d50e6fac97cacc810dd17eac3aa72
