@@ -55,7 +55,7 @@ void MovePlayerX(Game* g, int dx) {
 
 }
 
-void UpdatePlayer(Game* g) {
+void UpdatePlayer(Game *g) {
 	if (g->inDx != 0) {
 		MovePlayerX(g, g->inDx);
 	}
@@ -67,7 +67,7 @@ void UpdatePlayer(Game* g) {
 
 	ApplyGravity(&g->p);
 
-	ApplyFanWind(&g->p);
+	ApplyFanWind(g);
 
 	//  ⑤ MovePlayerY() 로 속도를 -MAX_RISE ~ MAX_FALL 로 제한하고 한 칸씩 세로 이동하며 착지·천장을 판정한다.
 	MovePlayerY(g);

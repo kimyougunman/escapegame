@@ -24,9 +24,10 @@ int InitGame(Game* g){
 	win.Bottom = SCREEN_H - 1;
 	SetConsoleWindowInfo(h, TRUE, &win);  // 3 창을 버퍼 크기에 맞춤
 	HideCursor(); // 깜빡이는 커서 숨기기 (CloseGame 에서 다시 보이게 함)
-
+	int stage = 1;
 	int flag;
-	flag = LoadMap(&g->map);
+	
+	flag = LoadMap(&g->map,stage);
 	srand((unsigned int)time(NULL));
 	if (flag){
 		// 플레이어 위치 초기화 
@@ -42,7 +43,10 @@ int InitGame(Game* g){
 		int Count_BUTTONS =0;
 		for(int y =28; y >= 0; y--){
 			for(int x =0 ; x <MAP_W; x++){
-				
+				if(g->map.tile[y][x]=='*'){
+					g->map.goalX = x;
+					g->map.goalY = y;
+				}
 				if(g->map.tile[y][x] == 'F' && Count_FANS  <MAX_FANS){
 					Fan * f = &g->fans[Count_FANS];
 					f->x =  x;

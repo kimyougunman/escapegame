@@ -19,9 +19,43 @@ int IsSolid(Map* m, int x, int y) {
     }
 }
 
+void gotoxy(int x, int y) {
+
+    COORD pos; // 콘솔 커서 위치 저장
+
+    pos.X = (SHORT)x;
+    pos.Y = (SHORT)y;
+
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos); // 커서를 (x, y) 위치로 이동
+}
+
+
+void HideCursor(void) {
+
+    CONSOLE_CURSOR_INFO cursorInfo; // 콘솔 커서 정보 저장
+
+    cursorInfo.dwSize = 1;
+    cursorInfo.bVisible = FALSE; // 커서를 보이지 않게 설정
+
+    SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE), &cursorInfo); // 설정 적용
+}
+
+
+int RandRange(int a, int b) {
+
+    // a가 b보다 큰 값으로 들어오면 두 값을 서로 바꿔줌
+    if (a > b) {
+        int temp = a;
+        a = b;
+        b = temp;
+    }
+
+    return a + rand() % (b - a + 1); // a 이상 b 이하의 랜덤한 정수 반환
+}
+
 
 // map.txt 파일을 읽어 게임 맵을 불러오는 함수(반환값은 1 = 맵 불러오기 성공 / 0 = 실패)
-int LoadMap(Map* map) {
+int LoadMap(Map* m, int stage) {
 
     FILE* fp;               // 맵 파일을 가리키는 파일 포인터
     char line[MAP_W + 2];   // 파일에서 읽은 한 줄을 임시로 저장하는 배열(+2는 줄바꿈 문자(\n) 와 문자열 종료 문자(\0) 공간)
@@ -33,6 +67,18 @@ int LoadMap(Map* map) {
         return 0;
     }
 
+    // 원하는 스테이지 전까지의 맵 줄을 건너뜀
+    // stage가 1이면 0줄, 2이면 29줄, 3이면 58줄 건너뜀
+    int skipLines = (stage - 1) * MAP_H;
+
+    for (int i = 0; i < skipLines; i++) {
+
+        if (fgets(line, sizeof(line), fp) == NULL) {
+            fclose(fp);
+            return 0;
+        }
+    }
+
     for (int y = 0; y < MAP_H; y++) {
 
         // 파일에서 한 줄을 읽어 line 배열에 저장, 만약 읽을 줄이 부족하면 파일을 닫고 실패 반환
@@ -41,13 +87,18 @@ int LoadMap(Map* map) {
             return 0;
         }
 
+        // 현재 줄의 실제 글자 수를 구함(\r, \n 제외)
+        size_t len = strcspn(line, "\r\n");
+
+        // 한 줄이 MAP_W 길이와 다르면 잘못된 맵 파일로 판단
+        if (len != MAP_W) {
+            fclose(fp);
+            return 0;
+        }
+
         // 읽어 온 한 줄의 문자를 맵 배열에 복사
         for (int x = 0; x < MAP_W; x++) {
-            map->tile[y][x] = line[x];
-            if (map->tile[y][x]=='*'){
-                map->goalX = x;
-                 map->goalY = y;
-            }
+            m->tile[y][x] = line[x];
         }
     }
 
@@ -70,8 +121,6 @@ void ClearBuffer(char buf[][SCREEN_W + 1]) {
 }
 
 
-
-
 // 완성된 화면 버퍼를 콘솔에 출력하는 함수
 void FlushBuffer(char buf[][SCREEN_W + 1]) {
 
@@ -91,6 +140,8 @@ void FlushBuffer(char buf[][SCREEN_W + 1]) {
             gotoxy(0, y + 1);
         }
     }
+
+    fflush(stdout); // 출력 대기 중인 내용을 콘솔 화면에 출력
 }
 
 
@@ -275,23 +326,4 @@ void Render(Game* g) {
     DrawHUD(buf, g); // 화면 맨 윗줄에 HP, 선풍기 상태, 경과 시간 표시
 
     FlushBuffer(buf); // 완성된 화면 버퍼를 콘솔에 한 번에 출력
-}
-
-
-// 콘솔 커서를 (x, y) 위치로 옮기는 함수(FlushBuffer 가 줄마다 사용)
-void gotoxy(int x, int y) {
-    COORD pos = { (SHORT)x, (SHORT)y };  // 이동할 좌표
-
-    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
-}
-
-
-// 깜빡이는 콘솔 커서를 숨기는 함수(InitGame 에서 호출, CloseGame 에서 다시 보이게 함)
-void HideCursor(void) {
-    CONSOLE_CURSOR_INFO cursor;  // 커서 정보 구조체
-
-    cursor.dwSize = 20;          // 커서 두께(1~100). 0 이면 설정이 실패한다
-    cursor.bVisible = FALSE;     // FALSE = 숨김 / TRUE = 보임
-
-    SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE), &cursor);
 }
