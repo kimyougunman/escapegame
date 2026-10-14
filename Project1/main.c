@@ -10,10 +10,76 @@ void CheckGoal(Game* g){
 	}
 }
 
+// 120 x 30 화면이 모니터(작업 표시줄 제외)를 꽉 채우도록 콘솔 글꼴 크기를 자동으로 키운다
+// 칸 수(120 x 30)는 그대로 두고 글자만 커진다. Windows Terminal 처럼 글꼴을 바꿀 수 없는 콘솔에서는 아무 일도 하지 않는다
+static void FitConsoleFont(HANDLE h) {
+	CONSOLE_FONT_INFOEX font;
+	RECT work;                 // 작업 표시줄을 뺀 화면 영역
+	int frameW, frameH;        // 창 테두리·제목 표시줄 두께
+	int fontH;
+
+	font.cbSize = sizeof(font);
+	if (!GetCurrentConsoleFontEx(h, FALSE, &font)) {
+		return;
+	}
+	if (!(font.FontFamily & TMPF_TRUETYPE)) {
+		lstrcpynW(font.FaceName, L"굴림체", LF_FACESIZE); // 래스터 글꼴은 크기를 못 바꾸므로 한글 고정폭 글꼴로 바꾼다
+	}
+	font.FontWeight = FW_NORMAL;
+
+	SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+	frameW = 2 * (GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER)) + GetSystemMetrics(SM_CXVSCROLL);
+	frameH = 2 * (GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER)) + GetSystemMetrics(SM_CYCAPTION);
+
+	// 화면 높이로 계산한 가장 큰 글꼴부터 한 단계씩 줄여 가며, 120 x 30 이 다 들어가는 크기를 찾는다
+	for (fontH = (work.bottom - work.top) / SCREEN_H; fontH >= 8; fontH--) {
+		font.dwFontSize.X = 0;            // 0 이면 높이에 맞는 너비를 자동으로 고른다
+		font.dwFontSize.Y = (SHORT)fontH;
+		if (!SetCurrentConsoleFontEx(h, FALSE, &font)) {
+			return;
+		}
+		GetCurrentConsoleFontEx(h, FALSE, &font); // 실제로 적용된 글자 한 칸의 크기(픽셀)를 다시 읽는다
+
+		COORD largest = GetLargestConsoleWindowSize(h);
+		if (font.dwFontSize.X * SCREEN_W + frameW <= work.right - work.left &&
+			font.dwFontSize.Y * SCREEN_H + frameH <= work.bottom - work.top &&
+			largest.X >= SCREEN_W && largest.Y >= SCREEN_H) {
+			return;
+		}
+	}
+}
+
+// 콘솔 창을 화면 가운데로 옮긴다
+// 콘솔은 창 크기를 조금 늦게 반영하므로, 지금 창 크기를 읽지 않고 글꼴 크기 x 120 x 30 으로 창 크기를 계산한다
+static void CenterConsoleWindow(HANDLE h) {
+	HWND hwnd = GetConsoleWindow();
+	CONSOLE_FONT_INFOEX font;
+	RECT r, work;
+
+	if (hwnd == NULL) {
+		return;
+	}
+	font.cbSize = sizeof(font);
+	if (!GetCurrentConsoleFontEx(h, FALSE, &font)) {
+		return;
+	}
+	r.left = 0;
+	r.top = 0;
+	r.right = font.dwFontSize.X * SCREEN_W;   // 글자 영역 크기
+	r.bottom = font.dwFontSize.Y * SCREEN_H;
+	AdjustWindowRectEx(&r, (DWORD)GetWindowLong(hwnd, GWL_STYLE), FALSE, (DWORD)GetWindowLong(hwnd, GWL_EXSTYLE)); // 테두리·제목 표시줄 포함 크기
+	SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+
+	int x = work.left + ((work.right - work.left) - (r.right - r.left)) / 2;
+	int y = work.top + ((work.bottom - work.top) - (r.bottom - r.top)) / 2;
+	SetWindowPos(hwnd, NULL, x > work.left ? x : work.left, y > work.top ? y : work.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
 int InitGame(Game* g){
 
 	memset(g, 0, sizeof(Game));
 	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);   // 콘솔 출력 손잡이
+	FitConsoleFont(h);                            // 0 글꼴을 화면에 꽉 차는 크기로 (창 크기를 정하기 전에 해야 한다)
 	SMALL_RECT win = { 0, 0, 1, 1 };
 	SetConsoleWindowInfo(h, TRUE, &win);          //1 창을 먼저 아주 작게
 
@@ -23,6 +89,7 @@ int InitGame(Game* g){
 	win.Right = SCREEN_W - 1;
 	win.Bottom = SCREEN_H - 1;
 	SetConsoleWindowInfo(h, TRUE, &win);  // 3 창을 버퍼 크기에 맞춤
+	CenterConsoleWindow(h);               // 4 커진 창을 화면 가운데로
 	HideCursor(); // 깜빡이는 커서 숨기기 (CloseGame 에서 다시 보이게 함)
 	int stage = 1;
 	int flag;
@@ -165,7 +232,7 @@ int main() {
 		if((g.state) == ST_EXIT){ // 종료 시 
 			break;
 		}
-		if(ShowEnding(&g) ==0){
+		if(ShowEnding(&g) == 0){
 			break;
 		}
 		
