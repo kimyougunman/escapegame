@@ -60,11 +60,32 @@ int InitGame(Game* g){
 					Button *b = &g->buttons[Count_BUTTONS];
 					b->x = x;
 					b->y = y;
-					b->fanId = Count_BUTTONS;
+					b->fanId = Count_BUTTONS; 
 					b->pressed = 0;
 					Count_BUTTONS++;
 				}
 			}
+		}
+		// 개미 초기화 :
+		int antInfo[][4] = { //  개미 한 마리 { x, y, left, right }
+			{ 35, 27, 35,  60 },   // 1층 
+			{ 30, 16, 30,  65 },   // 2층 
+			{ 82,  6, 82, 100 },   // 제일 위층 
+		};
+		int antCount = sizeof(antInfo) / sizeof(antInfo[0]) ;
+
+		for (int i = 0;   i< antCount  && (i <MAX_ANTS); i++) {
+			Ant* a = &g->ants[i];
+
+			a->x = antInfo[i][1-1];
+			a->y = antInfo[i][2-1];
+			a->left = antInfo[i][3-1];
+			a->right = antInfo[i][4-1];
+
+
+			a->dir = 1;
+			a->moveTick = ANT_TERM;
+			a->alive = 1;
 		}
 	}
 	if (flag == 0) {
