@@ -18,22 +18,29 @@
 
 /////  화면·플레이어 //////
 #define SCREEN_W 120 // 콘솔 화면 크기 (가로 칸 수)
-#define SCREEN_H 30 // 콘솔 화면 크기 (세로 줄 수)
-#define MAP_W 120  // 맵 크기. 화면 0번 줄은 HUD, 1~29번 줄이 맵
-#define MAP_H 29 // 맵 크기. 화면 0번 줄은 HUD, 1~29번 줄이 맵
-#define PLAYER_H 2 // 작아진 플레이어의 세로 크기 (머리 1칸 + 몸 1칸)
+#define SCREEN_H 36 // 콘솔 화면 크기 (세로 줄 수). 1920 x 1200 모니터 전체 화면 기준
+#define MAP_W 120  // 맵 크기. 화면 0번 줄은 HUD, 1~35번 줄이 맵
+#define MAP_H 35 // 맵 크기. 화면 0번 줄은 HUD, 1~35번 줄이 맵
+#define PLAYER_H 3 // 작아진 플레이어의 세로 크기 (머리 + 몸 + 다리)
+#define PLAYER_W 3 // 플레이어의 가로 크기
+#define PLAYER_HALF (PLAYER_W / 2) // 발 가운데(p.x)에서 몸 양 끝까지의 칸 수 (= 1)
 #define PLAYER_MAX_HP 3 // 시작 체력
 #define FRAME_MS 50 // 한 프레임 시간(ms). 약 20FPS
+#define HP_DRAIN_SEC 20 // 이 초마다 HP 가 1 씩 줄어든다 (시간 압박)
+#define HP_DRAIN_TICK (HP_DRAIN_SEC * 1000 / FRAME_MS) // 위 시간을 프레임으로 (20초 = 400프레임)
 #define INV_TICK 20 // 피격 후 무적 시간(프레임). 약 1초
 
 /////  이동·물리 //////
 #define GRAVITY 1 // 매 프레임 세로 속도에 더해지는 중력 (바람보다 먼저 더한다)
 #define MAX_FALL 2 // 최대 낙하 속도. 벽 뚫림 방지
+#define MAX_JUMPS 2 // 땅에 닿기 전까지 할 수 있는 점프 횟수 (2 = 2단 점프)
 #define JUMP_POWER (-3) // [수정] 괄호 추가. 점프할 때 세로 속도에 넣는 값 (위쪽이 음수)
 #define MAX_RISE 2 // 바람·점프로 올라갈 수 있는 최대 속도 (vy 는 -2 보다 작아지지 않는다)
 #define KNOCK_VY (-2) // [수정] 괄호 추가. 맞았을 때 튀어오르는 세로 속도
 
 /////  이벤트 1 — 낙하물 //////
+#define DROP_W 5 // 돌(낙하물) 가로 칸 수
+#define DROP_H 3 // 돌(낙하물) 세로 칸 수
 #define MAX_DROPS 8 // 동시에 존재할 수 있는 낙하물 수. 가득 차면 새로 만들지 않는다
 #define SPAWN_TERM 30 // 낙하물 생성 검사 주기(프레임)
 #define SPAWN_RATE 60 // 생성 확률(%)
@@ -43,8 +50,17 @@
 
 /////  이벤트 2·3 — 선풍기 / 개미 //////
 #define MAX_FANS 2 //  선풍기
+#define FAN_W 5 // 선풍기 가로 칸 수
+#define FAN_H 3 // 선풍기 세로 칸 수
+#define WIND_W 3 // 바람 기둥 가로 칸 수 (플레이어 너비와 같게)
 #define MAX_BUTTONS 2 //  버튼 개수
+#define BUTTON_W 2 // 버튼 가로 칸 수
+#define BUTTON_H 2 // 안 눌린 버튼 세로 칸 수 (눌리면 1)
 #define FAN_POWER 2 // 바람 세기. GRAVITY 보다 커야 떠오른다
+#define ANT_W 7 // 개미 가로 칸 수
+#define ANT_H 3 // 개미 세로 칸 수
+#define ANT_HIT_INSET 1 // 개미 히트박스 : 그림보다 양 끝을 1칸씩 줄인다 (가로 7 -> 5)
+#define ANT_HIT_H 2 // 개미 히트박스 세로 칸 수 : 더듬이 줄은 빼고 몸·다리 2줄만
 #define MAX_ANTS 6 // 개미 최대 마리 수
 #define ANT_TERM 4 // 개미가 몇 프레임마다 움직이는가
 #define ANT_STEP 1 // 한 번에 몇 칸씩 움직이는가
@@ -87,14 +103,19 @@ typedef struct Player { // 플레이어 위치, 방향, 속도, 점프 상태 �
 	int vy; // 세로 속도 (음수는 위로 양수는 아래로)
 	int face; // 바라보는 방향 (-1왼쪽/+1 오른쪽) 낙하물에 맞았을때 밀리는 방향 계산시에 사용
 	int onGround; // 바닥에 닿아 있으면 1. 점프 가능 여부, 클리어 판정에 사용
+	int jumpCount; // 땅에서 떨어진 뒤 점프한 횟수. MAX_JUMPS 까지만 점프할 수 있고, 착지하면 0
 	int hp; // 남은 체력. 0 이 되면 게임 오버
 	int invTick; // 남은 무적 프레임 수. 0 보다 크면 피격 판정 생략 + 깜빡임
 
 }Player; // p 하기 
 
 
+// 돌(낙하물) : 가로 5 x 세로 3, 갈색
+//   .---.
+//   (@@@)
+//   '---'    <- (x, y) = 맨 아랫줄 가운데 칸. x-2 ~ x+2, y-2 ~ y 를 차지한다
 typedef struct Drop {
-	int x, y; //낙하물 좌표
+	int x, y; //낙하물 좌표 (맨 아랫줄 가운데)
 	int prevY; // 이번 프레임에 움직이기 전의 y. prevY ~ y 구간으로 충돌을 봐서 관통을 막는다
 	DropState state;  // [수정] int → DropState. DROP_SHAKE(흔들림) / DROP_FALL(낙하) / DROP_LAND(착지)
 	int tick; //현재 상태가 유지되는 남은 프레임 수
@@ -102,27 +123,40 @@ typedef struct Drop {
 	int active; //이 자리를 사용 중이면 1
 }Drop;
 
+// 개미 : 가로 7 x 세로 3, 검정(진회색). 가는 방향을 바라본다 (배 - 가슴 - 머리 + 더듬이 + 다리)
+//        ,,      ,,
+//   (@)o(O)      (O)o(@)
+//     ^^^          ^^^      <- (x, y) = 왼쪽 아래 칸. x ~ x+6, y-2 ~ y 를 차지한다
 typedef struct Ant {
-	int x, y; // 개미 좌표
+	int x, y; // 개미 좌표 (왼쪽 아래 칸)
 	int dir; // 진행 방향 (-1 왼쪽 / +1 오른쪽)
-	int left, right; // 왕복 순찰 구간의 양 끝 x 좌표
+	int left, right; // 왕복 순찰 구간의 양 끝 x 좌표. 개미 몸 전체(7칸)가 이 안에서만 움직인다
 	int moveTick; // 다음 이동까지 남은 프레임 수
 	int alive; // 살아 있으면 1
 }Ant;
 
 
 
+// 선풍기 : 가로 FAN_W(5) x 세로 FAN_H(3) 의 막힌 칸. 위에 올라서면 바람을 탄다
+//   (-+-)   <- 날개 (켜지면 + / x 번갈아 돈다)   y - 2
+//     |     <- 기둥                              y - 1
+//   [___]   <- 받침 (가운데가 map.txt 의 'F')    y
+// 바람은 날개 바로 위 줄부터 위로 range 칸, 가로 WIND_W(3) 칸 기둥
 typedef struct Fan {
-	int x, y; //선풍기 위치 (바닥 위에 놓이며 위쪽으로 바람을 분다)
+	int x, y; //선풍기 받침 가운데 칸 (map.txt 의 'F' 위치). x-2 ~ x+2, y-2 ~ y 를 차지한다
 	int on; // 켜져 있으면 1. 버튼으로 토글
 	int power; // 바람 세기 = FAN_POWER(2). GRAVITY(1) 보다 커야 실제로 떠오른다
-	int range; // 바람이 위로 닿는 최대 높이(칸). 발판에 막히면 그 전에서 멈춘다
+	int range; // 바람이 선풍기 윗면에서 위로 닿는 최대 높이(칸). 발판에 막히면 그 전에서 멈춘다
 }Fan;
 
+// 버튼 : 'ㄷ' 자를 엎어 놓은 모양. 밟을 수 있는 막힌 칸이다
+//   안 눌림 (2 x 2)     눌림 (2 x 1)
+//       __
+//       ||                __
 typedef struct Button {
-	int x, y; // 버튼 위치 (밟고 지나가는 칸)
+	int x, y; // 버튼 왼쪽 아래 칸 (map.txt 의 'B' 위치). 버튼은 x ~ x+1, y-1 ~ y 를 차지한다
 	int fanId; // 이 버튼이 조작하는 선풍기 번호
-	int pressed; // 지금 밟고 있으면 1. 밟고 있는 동안 매 프레임 토글되는 것을 막는다
+	int pressed; // 눌려서 납작해진 상태(2 x 1)면 1. 플레이어가 위에서 내려갈 때까지 유지된다
 
 }Button;
 
@@ -165,12 +199,14 @@ void ProcessInput(Game* g); // 쌓여 있는 키를 기다리지 않고 모두 �
 void UpdateGame(Game* g); // 한 프레임의 게임 내용을 갱신한다. 호출 순서를 바꾸지 않는다. [그림 6]
 void UpdatePlayer(Game* g); // 좌우 이동 → 점프 → 중력 → 바람 → 속도 제한 → 세로 이동 순으로 플레이어의 한 프레임을 처리한다. [그림 9]
 void MovePlayerX(Game* g, int dx); // 가로로 한 칸 이동을 시도하고 막혀 있으면 취소한다.
-void TryJump(Player* p); // 바닥에 있을 때만 세로 속도에 JUMP_POWER 를 넣어 점프시킨다.
+void TryJump(Player* p); // 점프 횟수가 MAX_JUMPS(2) 보다 적을 때만 세로 속도에 JUMP_POWER 를 넣어 점프시킨다 (2단 점프).
 void ApplyGravity(Player* p); // 세로 속도에 중력을 더한다. 바람보다 먼저 호출한다
 void ApplyFanWind(Game* g); // 플레이어의 발 칸에 바람이 있으면 세로 속도에서 바람 세기를 빼 위로 띄운다
 void MovePlayerY(Game* g); // 세로 속도를 제한하고 |vy| 칸만큼 한 칸씩 이동하며 착지·천장 충돌을 판정한다.
 int IsSolid(Map* m, int x, int y); // 해당 칸이 막혀 있는지 검사한다. 막혀 있으면 1, 지나갈 수 있으면 0 을 반환한다 플레이어·개미·낙하물·바람이 모두 이 함수를 사용하므로 가장 먼저 완성해야 한다.
+void SetButtonTiles(Game* g, int i); // i 번 버튼이 차지하는 칸을 맵에 막힌 칸('B')으로 표시한다. 눌렸으면 아랫줄만, 아니면 2 x 2
 void UpdateButtons(Game* g); // 버튼(블록)을 새로 밟은 순간에만 연결된 선풍기를 ON/OFF 토글한다. (이벤트 2) [그림 7]
+void SetFanTiles(Game* g, int i); // i 번 선풍기가 차지하는 5 x 3 칸을 맵에 막힌 칸('F')으로 표시한다
 void UpdateFans(Game* g); // 켜진 선풍기의 바람이 닿는 칸을 위쪽으로 계산해 wind[y][x] 에 기록한다. (이벤트 2) [그림 8]
 void UpdateDrops(Game* g); // 낙하물을 흔들림 → 낙하 → 착지 → 소멸 순서로 갱신한다. (이벤트 1) [그림 10]
 int SpawnDrop(Game* g); // 빈 자리를 찾아 랜덤 위치에 새 낙하물을 만든다. 성공하면 자리 번호, 빈 자리가 없으면 -1 을 반환한다.

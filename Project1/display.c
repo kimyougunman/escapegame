@@ -7,13 +7,14 @@ int IsSolid(Map* m, int x, int y) {
         return 1;
     }
 
-    // 좌표값이 #(벽/바닥), =(발판), F(선풍기) 이라면 이동 불가능
+    // 좌표값이 #(벽/바닥), =(발판), F(선풍기), B(버튼) 이라면 이동 불가능
     if (m->tile[y][x] == '#' ||
         m->tile[y][x] == '=' ||
-        m->tile[y][x] == 'F') {
+        m->tile[y][x] == 'F' ||
+        m->tile[y][x] == 'B') {
         return 1;
     }
-    // 빈칸, 버튼, 약병 등은 통과 가능
+    // 빈칸, 약병 등은 통과 가능
     else {
         return 0;
     }
@@ -122,23 +123,67 @@ void ClearBuffer(char buf[][SCREEN_W + 1]) {
 
 
 // 완성된 화면 버퍼를 콘솔에 출력하는 함수
+// 전체 화면이라 콘솔 줄 수가 SCREEN_H 보다 많으면, 남는 줄의 절반만큼 내려서 세로 가운데에 출력한다
+// 콘솔 화면 버퍼에서 게임 화면(SCREEN_W x SCREEN_H)이 놓일 왼쪽 위 위치를 구한다
+// 콘솔이 게임 화면보다 크면(전체 화면, Alt+Enter 등) 가로·세로 가운데에 놓는다
+static void GetScreenOrigin(CONSOLE_SCREEN_BUFFER_INFO* info, int* left, int* top) {
+    *left = (info->dwSize.X > SCREEN_W) ? (info->dwSize.X - SCREEN_W) / 2 : 0;
+    *top = (info->dwSize.Y > SCREEN_H) ? (info->dwSize.Y - SCREEN_H) / 2 : 0;
+}
+
+// 게임 화면 바깥(위·아래 남는 줄, 좌우 남는 칸)을 빈칸으로 지운다
+// Alt+Enter 등으로 콘솔 크기가 바뀌면 게임 화면 위치가 옮겨지는데, 예전 위치에 찍혀 있던 글자가 남지 않게 한다
+static void ClearOutsideScreen(HANDLE h, CONSOLE_SCREEN_BUFFER_INFO* info, int left, int top) {
+    DWORD written;
+    WORD gray = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+    int width = info->dwSize.X;
+    int rows = info->dwSize.Y;
+    COORD pos;
+
+    for (int y = 0; y < rows; y++) {
+        pos.Y = (SHORT)y;
+        if (y < top || y >= top + SCREEN_H) {              // 위·아래 남는 줄 : 한 줄 전체
+            pos.X = 0;
+            FillConsoleOutputCharacterA(h, ' ', width, pos, &written);
+            FillConsoleOutputAttribute(h, gray, width, pos, &written);
+        }
+        else {
+            if (left > 0) {                                // 왼쪽 남는 칸
+                pos.X = 0;
+                FillConsoleOutputCharacterA(h, ' ', left, pos, &written);
+            }
+            if (left + SCREEN_W < width) {                 // 오른쪽 남는 칸
+                pos.X = (SHORT)(left + SCREEN_W);
+                FillConsoleOutputCharacterA(h, ' ', width - (left + SCREEN_W), pos, &written);
+            }
+        }
+    }
+}
+
 void FlushBuffer(char buf[][SCREEN_W + 1]) {
 
-    gotoxy(0, 0); // 콘솔 커서를 화면 맨 왼쪽 위로 이동
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    int rows = SCREEN_H, width = SCREEN_W;   // 콘솔 화면 버퍼의 실제 줄 수·칸 수
+    int left = 0, top = 0;                   // 게임 화면 (0, 0) 이 출력될 콘솔 위치
+
+    if (GetConsoleScreenBufferInfo(h, &info)) {
+        rows = info.dwSize.Y;
+        width = info.dwSize.X;
+        GetScreenOrigin(&info, &left, &top);
+        ClearOutsideScreen(h, &info, left, top);   // 예전 위치의 흔적 지우기
+    }
 
     for (int y = 0; y < SCREEN_H; y++) {
 
-        // 마지막 행일 경우
-        if (y == SCREEN_H - 1) {
-            buf[y][SCREEN_W - 1] = '\0'; // 마지막 칸에 문자열 종료 문자 삽입
+        gotoxy(left, top + y); // 출력할 줄의 맨 왼쪽으로 커서 이동
+
+        // 콘솔의 맨 오른쪽 아래 칸이면 비운다 (그 칸까지 쓰면 커서가 넘어가며 화면 전체가 한 줄 올라간다)
+        if (top + y == rows - 1 && left + SCREEN_W == width) {
+            buf[y][SCREEN_W - 1] = '\0';
         }
 
         printf("%s", buf[y]); // 현재 행의 문자열 출력
-
-        // 마지막 행이 아니라면 다음 행으로 이동
-        if (y < SCREEN_H - 1) {
-            gotoxy(0, y + 1);
-        }
     }
 
     fflush(stdout); // 출력 대기 중인 내용을 콘솔 화면에 출력
@@ -150,7 +195,49 @@ void DrawMap(char buf[][SCREEN_W + 1], Game* g) {
 
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++) {
-            buf[y + 1][x] = g->map.tile[y][x]; // 맵의 위치에 있는 타일 문자를 버퍼에 복사(0번 줄은 HUD이므로 y+1 위치에 그림)
+            char c = g->map.tile[y][x];
+
+            buf[y + 1][x] = (c == 'B' || c == 'F') ? ' ' : c; // 맵의 타일 문자를 버퍼에 복사(0번 줄은 HUD이므로 y+1 위치). 버튼·선풍기 칸은 아래에서 그림으로 그린다
+        }
+    }
+
+    // 선풍기 그리기 : 5 x 3. 켜져 있으면 날개가 + / x 로 번갈아 돈다
+    for (int i = 0; i < MAX_FANS; i++) {
+        Fan* f = &g->fans[i];
+        const char* blade = (f->on && (g->frame / 2) % 2 == 1) ? "(-x-)" : "(-+-)";
+        const char* art[FAN_H] = { blade, "  |  ", "[___]" };
+
+        if (f->y < FAN_H - 1 || f->y >= MAP_H || g->map.tile[f->y][f->x] != 'F') {
+            continue; // 맵에 없는 선풍기 자리
+        }
+        for (int row = 0; row < FAN_H; row++) {
+            for (int col = 0; col < FAN_W; col++) {
+                int mx = f->x - FAN_W / 2 + col;
+                int my = f->y - (FAN_H - 1) + row;
+
+                if (mx >= 0 && mx < MAP_W && art[row][col] != ' ') {
+                    buf[my + 1][mx] = art[row][col];
+                }
+            }
+        }
+    }
+
+    // 버튼 그리기 : 안 눌림은 'ㄷ' 자를 엎은 2 x 2, 눌림은 납작한 2 x 1
+    for (int i = 0; i < MAX_BUTTONS; i++) {
+        Button* b = &g->buttons[i];
+
+        if (b->y < 1 || b->y >= MAP_H || b->x < 0 || b->x + BUTTON_W > MAP_W || g->map.tile[b->y][b->x] != 'B') {
+            continue; // 맵에 없는 버튼 자리
+        }
+        if (b->pressed == 0) {
+            buf[b->y][b->x] = '_';         // 윗줄 (맵 y-1 → 화면 y)
+            buf[b->y][b->x + 1] = '_';
+            buf[b->y + 1][b->x] = '|';     // 아랫줄 (맵 y → 화면 y+1)
+            buf[b->y + 1][b->x + 1] = '|';
+        }
+        else {
+            buf[b->y + 1][b->x] = '_';     // 눌리면 아랫줄만 납작하게
+            buf[b->y + 1][b->x + 1] = '_';
         }
     }
 }
@@ -159,23 +246,22 @@ void DrawMap(char buf[][SCREEN_W + 1], Game* g) {
 // 선풍기에서 발생하는 바람을 화면에 그리는 함수
 void DrawWind(char buf[][SCREEN_W + 1], Game* g) {
 
-    const char windAnimation[4] = { '|', '/', '|', '\\' }; // 바람 애니메이션에 사용할 문자 4개
-
-    char windChar = windAnimation[g->frame % 4]; // 현재 프레임을 4로 나눈 나머지로 바람 모양 선택
+    const char windAnimation[4] = { '|', '^', '|', ':' }; // 바람 애니메이션에 사용할 문자 4개 (역슬래시는 한글 글꼴에서 ₩ 로 보여서 쓰지 않는다)
 
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++) {
 
             // 현재 칸에 선풍기 바람이 존재하면
             if (g->wind[y][x] > 0) {
-                buf[y + 1][x] = windChar; //바람 문자를 덮어 그리기
+                // (y + x + frame) 으로 고르면 같은 무늬가 매 프레임 한 줄씩 위로 올라가 보인다. 가운데 줄은 엇갈리게
+                buf[y + 1][x] = windAnimation[(y + x * 2 + g->frame) % 4];
             }
         }
     }
 }
 
 
-// 낙하물과 개미를 화면 버퍼에 그리는 함수('o', 개미는 'm' 문자로 표현)
+// 낙하물(돌 5 x 3)과 개미(7 x 3)를 화면 버퍼에 그리는 함수
 void DrawObjects(char buf[][SCREEN_W + 1], Game* g) {
 
     for (int i = 0; i < MAX_DROPS; i++) {
@@ -194,17 +280,18 @@ void DrawObjects(char buf[][SCREEN_W + 1], Game* g) {
             drawX += d->shakeX; // 흔들림 값(-1 또는 +1)을 적용하여 좌우 흔들림 표현
         }
 
-        // 그릴 x좌표가 맵 밖이면 그리지 않음
-        if (drawX < 0 || drawX >= MAP_W) {
-            continue;
-        }
+        // 돌 5 x 3 그림 (맨 아랫줄 가운데가 drawX, d->y)
+        const char* rock[DROP_H] = { ".---.", "(@@@)", "'---'" };
 
-        // 낙하물의 y좌표가 맵 밖이면 그리지 않음
-        if (d->y < 0 || d->y >= MAP_H) {
-            continue;
+        for (int row = 0; row < DROP_H; row++) {
+            int my = d->y - (DROP_H - 1) + row;
+            for (int col = 0; col < DROP_W; col++) {
+                int mx = drawX - DROP_W / 2 + col;
+                if (mx >= 0 && mx < MAP_W && my >= 0 && my < MAP_H) { // 맵 밖 칸은 그리지 않음
+                    buf[my + 1][mx] = rock[row][col];
+                }
+            }
         }
-
-        buf[d->y + 1][drawX] = 'o'; // 낙하물의 위치에 'o' 문자 그리기
     }
 
     for (int i = 0; i < MAX_ANTS; i++) {
@@ -216,18 +303,20 @@ void DrawObjects(char buf[][SCREEN_W + 1], Game* g) {
             continue;
         }
 
-        // 개미의 x좌표가 맵 밖이면 그리지 않음
-        if (a->x < 0 || a->x >= MAP_W) {
-            continue;
-        }
+        // 개미 7 x 3 그림. 가는 방향을 바라본다 (왼쪽 아래 칸이 a->x, a->y)
+        const char* right[ANT_H] = { "     ,,", "(@)o(O)", "  ^^^  " };
+        const char* left[ANT_H] = { ",,     ", "(O)o(@)", "  ^^^  " };
+        const char** art = (a->dir > 0) ? right : left;
 
-        // 개미의 y좌표가 맵 밖이면 그리지 않음
-        if (a->y < 0 || a->y >= MAP_H) {
-            continue;
+        for (int row = 0; row < ANT_H; row++) {
+            int my = a->y - (ANT_H - 1) + row;
+            for (int col = 0; col < ANT_W; col++) {
+                int mx = a->x + col;
+                if (mx >= 0 && mx < MAP_W && my >= 0 && my < MAP_H && art[row][col] != ' ') { // 맵 밖 칸은 그리지 않음
+                    buf[my + 1][mx] = art[row][col];
+                }
+            }
         }
-
-        // 개미의 위치에 'm' 문자 그리기
-        buf[a->y + 1][a->x] = 'm';
     }
 }
 
@@ -243,25 +332,30 @@ void DrawPlayer(char buf[][SCREEN_W + 1], Game* g) {
         return;
     }
 
-    // 플레이어의 현재 위치 저장(x는 가로 위치, y는 몸의 위치)
+    // 3 x 3 플레이어 그림. 맨 아랫줄이 발(p.y), 가운데 칸이 p.x
+    const char* art[PLAYER_H] = {
+        "(o)",   // 머리 (y - 2)
+        "<|>",   // 몸   (y - 1)
+        "| |",   // 발   (y)      ※ 역슬래시는 한글 글꼴에서 ₩ 로 보여서 쓰지 않는다
+    };
+
+    // 플레이어의 현재 위치 저장(x는 발 가운데, y는 발의 위치)
     x = p->x;
     y = p->y;
 
-    // 플레이어의 x좌표가 맵 밖이면 그리지 않음
-    if (x < 0 || x >= MAP_W) {
-        return;
-    }
+    for (int row = 0; row < PLAYER_H; row++) {
+        int my = y - (PLAYER_H - 1) + row;         // 그릴 맵 y
 
-    // 플레이어 머리의 위치가 맵 범위 안이면
-    if (y - 1 >= 0 && y - 1 < MAP_H) {
-        buf[y][x] = '0'; // 머리는 몸보다 한 칸 위에 그림
-    }
+        if (my < 0 || my >= MAP_H) {
+            continue;                              // 맵 밖 줄은 그리지 않음
+        }
+        for (int col = 0; col < PLAYER_W; col++) {
+            int mx = x - PLAYER_HALF + col;        // 그릴 맵 x
 
-    // 플레이어 몸의 위치가 맵 범위 안이면
-    if (y >= 0 && y < MAP_H) {
-
-        // 몸은 플레이어의 발 좌표에 '^' 문자로 그림
-        buf[y + 1][x] = '^';
+            if (mx >= 0 && mx < MAP_W && art[row][col] != ' ') {
+                buf[my + 1][mx] = art[row][col];   // 0번 줄은 HUD 이므로 화면 y = 맵 y + 1
+            }
+        }
     }
 }
 
@@ -296,12 +390,13 @@ void DrawHUD(char buf[][SCREEN_W + 1], Game* g) {
     snprintf(
         hud,
         sizeof(hud),
-        "HP: %d/%d | FAN1: %s | FAN2: %s | TIME: %u sec",
+        "HP: %d/%d | FAN1: %s | FAN2: %s | TIME: %u sec | HP -1 in %u sec",
         g->p.hp,      // 현재 플레이어 체력
         PLAYER_MAX_HP,  // 플레이어 최대 체력
         fan1,           // 첫 번째 선풍기 상태
         fan2,           // 두 번째 선풍기 상태
-        seconds         // 게임 경과 시간(초)
+        seconds,        // 게임 경과 시간(초)
+        (unsigned int)(HP_DRAIN_SEC - seconds % HP_DRAIN_SEC) // 다음 HP 감소까지 남은 시간(초)
     );
 
     memcpy(buf[0], hud, strlen(hud)); // 완성된 HUD 문자열을 화면 버퍼의 첫 번째 줄에 복사
@@ -309,9 +404,119 @@ void DrawHUD(char buf[][SCREEN_W + 1], Game* g) {
 
 
 // 한 프레임의 게임 화면을 완성하고 콘솔에 출력하는 함수(맵 → 바람 → 낙하물·개미 → 플레이어 → HUD 순서로 그림)
+/////  색깔 //////
+#define COLOR_DEFAULT (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)   // 기본 회색
+#define COLOR_BUTTON  (FOREGROUND_RED | FOREGROUND_INTENSITY)                 // 버튼 : 빨간색
+#define COLOR_WIND    (FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY) // 바람 : 파란색(밝은 하늘빛이라 검은 바탕에서 잘 보인다)
+#define COLOR_ROCK    (FOREGROUND_RED | FOREGROUND_GREEN)   // 돌 : 갈색 (InitGame 에서 이 색 자리를 갈색으로 바꿔 둔다)
+#define COLOR_ANT     (FOREGROUND_INTENSITY)                // 개미 : 검정에 가까운 진회색 (InitGame 에서 바꿔 둔다)
+#define COLOR_DECOR   (FOREGROUND_BLUE)                     // 배경 장식(창문·시계·액자) : 어두운 청회색 (InitGame 에서 바꿔 둔다)
+
+// 화면 칸마다 색을 정한다. 기본은 회색, 버튼은 빨간색, 바람은 파란색, 돌은 갈색, 개미는 검정(진회색), 플레이어는 기본색
+static void ColorScene(WORD attr[][SCREEN_W], Game* g) {
+
+    for (int y = 0; y < SCREEN_H; y++) {
+        for (int x = 0; x < SCREEN_W; x++) {
+            attr[y][x] = COLOR_DEFAULT;
+        }
+    }
+
+    // 배경 장식 : 벽·발판·선풍기·버튼·약병이 아닌 글자는 어두운 색으로 (게임 물체보다 눈에 덜 띄게)
+    for (int y = 0; y < MAP_H; y++) {
+        for (int x = 0; x < MAP_W; x++) {
+            char c = g->map.tile[y][x];
+            if (c != ' ' && c != '#' && c != '=' && c != 'F' && c != 'B' && c != '*') {
+                attr[y + 1][x] = COLOR_DECOR;
+            }
+        }
+    }
+
+    // 바람 (맵 y -> 화면 y + 1)
+    for (int y = 0; y < MAP_H; y++) {
+        for (int x = 0; x < MAP_W; x++) {
+            if (g->wind[y][x] > 0) {
+                attr[y + 1][x] = COLOR_WIND;
+            }
+        }
+    }
+
+    // 버튼 : 안 눌림은 2 x 2, 눌림은 아랫줄 2 x 1
+    for (int i = 0; i < MAX_BUTTONS; i++) {
+        Button* b = &g->buttons[i];
+
+        if (b->y < 1 || b->y >= MAP_H || b->x < 0 || b->x + BUTTON_W > MAP_W || g->map.tile[b->y][b->x] != 'B') {
+            continue;
+        }
+        for (int x = b->x; x < b->x + BUTTON_W; x++) {
+            attr[b->y + 1][x] = COLOR_BUTTON;          // 아랫줄
+            if (b->pressed == 0) {
+                attr[b->y][x] = COLOR_BUTTON;          // 윗줄
+            }
+        }
+    }
+
+    // 돌 : 갈색 (5 x 3)
+    for (int i = 0; i < MAX_DROPS; i++) {
+        Drop* d = &g->drops[i];
+        int cx = d->x + (d->state == DROP_SHAKE ? d->shakeX : 0);
+
+        if (!d->active) continue;
+        for (int y = d->y - (DROP_H - 1); y <= d->y; y++)
+            for (int x = cx - DROP_W / 2; x <= cx + DROP_W / 2; x++)
+                if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) attr[y + 1][x] = COLOR_ROCK;
+    }
+
+    // 개미 : 검정(진회색) (7 x 3)
+    for (int i = 0; i < MAX_ANTS; i++) {
+        Ant* a = &g->ants[i];
+
+        if (!a->alive) continue;
+        for (int y = a->y - (ANT_H - 1); y <= a->y; y++)
+            for (int x = a->x; x < a->x + ANT_W; x++)
+                if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) attr[y + 1][x] = COLOR_ANT;
+    }
+
+    // 플레이어는 원래 색으로
+    for (int y = g->p.y - (PLAYER_H - 1); y <= g->p.y; y++) {
+        for (int x = g->p.x - PLAYER_HALF; x <= g->p.x + PLAYER_HALF; x++) {
+            if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) attr[y + 1][x] = COLOR_DEFAULT;
+        }
+    }
+}
+
+// 글자 버퍼와 색 버퍼를 WriteConsoleOutput 으로 한 번에 출력한다 (printf 보다 빠르고 칸마다 색을 줄 수 있다)
+// 게임 화면 전용. 한글이 있는 인트로 컷은 FlushBuffer 를 쓴다
+static void FlushBufferColor(char buf[][SCREEN_W + 1], WORD attr[][SCREEN_W]) {
+
+    static CHAR_INFO cells[SCREEN_H * SCREEN_W];   // 크기가 커서 static (스택 대신)
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    int left = 0, top = 0;
+    COORD size = { SCREEN_W, SCREEN_H };
+    COORD from = { 0, 0 };
+    SMALL_RECT area;
+
+    if (GetConsoleScreenBufferInfo(h, &info)) {
+        GetScreenOrigin(&info, &left, &top);       // FlushBuffer 와 같은 가운데 정렬
+        ClearOutsideScreen(h, &info, left, top);   // 예전 위치의 흔적 지우기
+    }
+    for (int y = 0; y < SCREEN_H; y++) {
+        for (int x = 0; x < SCREEN_W; x++) {
+            cells[y * SCREEN_W + x].Char.AsciiChar = buf[y][x] ? buf[y][x] : ' ';
+            cells[y * SCREEN_W + x].Attributes = attr[y][x];
+        }
+    }
+    area.Left = (SHORT)left;
+    area.Top = (SHORT)top;
+    area.Right = (SHORT)(left + SCREEN_W - 1);
+    area.Bottom = (SHORT)(top + SCREEN_H - 1);
+    WriteConsoleOutputA(h, cells, size, from, &area);
+}
+
 void Render(Game* g) {
 
     char buf[SCREEN_H][SCREEN_W + 1];// 실제 콘솔에 출력하기 전 그림을 저장할 임시 화면 버퍼(각 행에 문자열 종료 문자 공간(+1)을 추가)
+    WORD attr[SCREEN_H][SCREEN_W];   // 칸마다의 색
 
     ClearBuffer(buf); // 이전 프레임의 그림이 남지 않도록 버퍼 전체를 공백으로 초기화
 
@@ -325,5 +530,7 @@ void Render(Game* g) {
 
     DrawHUD(buf, g); // 화면 맨 윗줄에 HP, 선풍기 상태, 경과 시간 표시
 
-    FlushBuffer(buf); // 완성된 화면 버퍼를 콘솔에 한 번에 출력
+    ColorScene(attr, g); // 칸마다 색 정하기 (버튼 빨강, 바람 파랑)
+
+    FlushBufferColor(buf, attr); // 완성된 화면을 글자와 색으로 콘솔에 한 번에 출력
 }
