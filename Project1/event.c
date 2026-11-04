@@ -495,13 +495,206 @@ static void BuildCut(char buf[][SCREEN_W + 1], int cut, int k) {
 	}
 }
 
+/////  컷 화면 색 (타이틀·인트로·엔딩·게임 오버 공통) //////
+
+// 컷 화면을 "실제 집 방" 색감으로 꾸민다. 글자를 바꾸고(buf), 칸마다 색을 정한다(attr). 출력은 하지 않는다
+//  frameTop ~ frameBottom : 그림 테두리,  floorY : 방바닥 줄
+//  talkTop ~ talkBottom : 대사 상자 (없으면 -1),  belowFloor : 바닥 아래 ~ 테두리 사이 칸의 배경색
+static void ThemeCut(char buf[][SCREEN_W + 1], WORD attr[][SCREEN_W], int frameTop, int frameBottom, int floorY,
+	int talkTop, int talkBottom, WORD belowFloor) {
+
+	for (int y = 0; y < SCREEN_H; y++) {
+		for (int x = 0; x < SCREEN_W; x++) {
+			char c = buf[y][x];
+			WORD a = ATTR(PAL_TEXT, PAL_WALL);
+			int border = ((y == frameTop || y == frameBottom) && x >= 0 && x < SCREEN_W) ||
+				((x == 0 || x == SCREEN_W - 1) && y >= frameTop && y <= frameBottom);
+			int talk = (talkTop >= 0 && y >= talkTop && y <= talkBottom);
+			int talkBorder = talk && (y == talkTop || y == talkBottom || x == 0 || x == SCREEN_W - 1);
+
+			if (border || talkBorder) {                                   // 테두리 : 원목
+				buf[y][x] = ' ';
+				a = ATTR(PAL_WOOD_D, PAL_WOOD);
+			}
+			else if (talk) {                                               // 대사 상자 : 크림색 말풍선
+				a = ATTR(PAL_TEXT, PAL_CREAM);
+			}
+			else if (y == floorY) {                                       // 방바닥 : 원목 마루
+				buf[y][x] = (x % 7 == 0) ? '|' : '_';
+				a = ATTR(PAL_WOOD_D, PAL_WOOD);
+			}
+			else if (y > floorY && y < frameBottom) {                     // 바닥 아래
+				a = (WORD)(PAL_TEXT | (belowFloor << 4));
+			}
+			else if (y > frameTop && y < floorY) {                        // 방 안
+				if (c == '#') { buf[y][x] = ' '; a = ATTR(PAL_WOOD_D, PAL_WOOD); }   // 원목 블록 (큰 글씨, 책상 다리)
+				else if (c == '=') { buf[y][x] = '_'; a = ATTR(PAL_WOOD_D, PAL_WOOD); } // 책상 판
+				else if (c == '~' || c == '*' || c == '^') a = ATTR(PAL_BLUE, PAL_WALL); // 효과
+				else if (c == '!' || c == '?') a = ATTR(PAL_RED, PAL_WALL);             // 놀람·물음
+				else if (c == ' ') {                                                    // 벽지 무늬
+					if (y % 4 == 1 && x % 8 == 2) buf[y][x] = '.';
+					else if (y % 4 == 3 && x % 8 == 6) buf[y][x] = '\'';
+					if (buf[y][x] != ' ') a = ATTR(PAL_PATTERN, PAL_WALL);
+				}
+			}
+			attr[y][x] = a;
+		}
+	}
+}
+
+// ThemeCut 이 정한 색을 이미 출력된 화면에 칠한다 (FlushBuffer 는 printf 라 색을 줄 수 없어서, 출력한 뒤 칠한다)
+static void PaintCut(WORD attr[][SCREEN_W]) {
+	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	DWORD written;
+	int left = 0, top = 0;
+
+	if (GetConsoleScreenBufferInfo(h, &info)) {   // FlushBuffer 와 같은 가운데 정렬 위치
+		left = (info.dwSize.X > SCREEN_W) ? (info.dwSize.X - SCREEN_W) / 2 : 0;
+		top = (info.dwSize.Y > SCREEN_H) ? (info.dwSize.Y - SCREEN_H) / 2 : 0;
+	}
+	for (int y = 0; y < SCREEN_H; y++) {
+		COORD pos = { (SHORT)left, (SHORT)(top + y) };
+		WriteConsoleOutputAttribute(h, attr[y], SCREEN_W, pos, &written);
+	}
+}
+
+// 컷 화면(인트로·엔딩·게임 오버)을 꾸며서 출력한다
+static void FlushCut(char buf[][SCREEN_W + 1]) {
+	static WORD attr[SCREEN_H][SCREEN_W];
+
+	ThemeCut(buf, attr, CUT_FRAME_TOP, CUT_FRAME_BOTTOM, CUT_FLOOR_Y, CUT_TALK_TOP, CUT_TALK_BOTTOM, PAL_WOOD_D);
+	FlushBuffer(buf);
+	PaintCut(attr);
+}
+
 // 컷만화 한 컷을 120 x 36 화면 전체에 그린다
 // k 는 사람 크기(1~3). 0 이면 컷마다 정해진 크기를 쓴다
 void DrawCut(int cut, int k) {
 	char buf[SCREEN_H][SCREEN_W + 1]; // 화면 버퍼 (Render 와 같은 방식)
 
 	BuildCut(buf, cut, k);
-	FlushBuffer(buf); // 완성된 컷을 한 번에 출력
+	FlushCut(buf); // 방 색감으로 꾸며서 한 번에 출력
+}
+
+/////  타이틀 화면 (시작 화면) //////
+
+// 큰 글씨 "작아진 나" : 제목 그대로 "작아진" 은 작게, "나" 는 크게 쓴다
+//  '@' 칸은 파랑 블록(작아진), '%' 칸은 빨강 블록(나)으로 칠한다 (ShowTitle)
+#define TITLE_SMALL_W  9    // "작" "아" "진" 한 글자 가로 칸 수
+#define TITLE_SMALL_H  7    // 세로 줄 수
+#define TITLE_BIG_W    16   // "나" 가로 칸 수
+#define TITLE_BIG_H    11   // 세로 줄 수
+
+static const char* TITLE_JAK[TITLE_SMALL_H] = { "@@@@@  @ ", "  @    @ ", " @ @   @@", "@   @  @ ", "         ", "@@@@@@@@ ", "       @ " };
+static const char* TITLE_AH[TITLE_SMALL_H]  = { "       @ ", " @@@   @ ", "@   @  @@", "@   @  @ ", " @@@   @ ", "       @ ", "       @ " };
+static const char* TITLE_JIN[TITLE_SMALL_H] = { "@@@@@  @ ", "  @    @ ", " @ @   @ ", "@   @  @ ", "         ", "@        ", "@@@@@@@@ " };
+static const char* TITLE_NA[TITLE_BIG_H] = {
+	"           %%   ",
+	"%%         %%   ",
+	"%%         %%   ",
+	"%%         %%%%%",
+	"%%         %%%%%",
+	"%%         %%   ",
+	"%%         %%   ",
+	"%%%%%%%%%  %%   ",
+	"%%%%%%%%%  %%   ",
+	"           %%   ",
+	"           %%   ",
+};
+
+#define TITLE_Y        2                                                   // 큰 글씨("나") 맨 윗줄
+#define TITLE_BOTTOM   (TITLE_Y + TITLE_BIG_H - 1)                         // 큰 글씨 맨 아랫줄 (작은 글씨도 여기에 맞춘다)
+#define TITLE_X        ((SCREEN_W - (TITLE_SMALL_W * 3 + 2 * 2 + 5 + TITLE_BIG_W)) / 2) // 제목 왼쪽 끝
+#define TITLE_NA_X     (TITLE_X + TITLE_SMALL_W * 3 + 2 * 2 + 5)           // "나" 왼쪽 끝 (작아진 + 띄어쓰기 5칸)
+#define TITLE_SUB_Y    (TITLE_BOTTOM + 2)                                  // 부제 줄
+#define TITLE_FLOOR_Y  28                     // 장면 바닥 줄
+#define TITLE_DESK_Y   (TITLE_FLOOR_Y - 7)    // 거대한 책상 판 줄
+#define TITLE_PRESS_Y  31                     // PRESS ANY KEY 줄
+#define TITLE_KEYS_Y   33                     // 조작법 줄
+
+// 타이틀 화면을 화면 버퍼에 그린다. showPress 가 0 이면 PRESS ANY KEY 문구를 숨긴다 (깜빡임)
+static void BuildTitle(char buf[][SCREEN_W + 1], int showPress) {
+	ClearBuffer(buf);
+
+	// 큰 글씨 "작아진 나" : 작은 글씨 3개와 큰 "나" 를 아랫줄에 맞춰 놓는다
+	PutArt(buf, TITLE_X, TITLE_BOTTOM, TITLE_JAK, TITLE_SMALL_H);
+	PutArt(buf, TITLE_X + TITLE_SMALL_W + 2, TITLE_BOTTOM, TITLE_AH, TITLE_SMALL_H);
+	PutArt(buf, TITLE_X + (TITLE_SMALL_W + 2) * 2, TITLE_BOTTOM, TITLE_JIN, TITLE_SMALL_H);
+	PutArt(buf, TITLE_NA_X, TITLE_BOTTOM, TITLE_NA, TITLE_BIG_H);
+	PutCenter(buf, TITLE_SUB_Y, "~ 약을 마시고 작아진 나의 방 탈출 ~");
+
+	// 장면 : 거대한 책상 위의 약병을 올려다보는 작은 나
+	for (int x = 1; x < SCREEN_W - 1; x++) {
+		buf[TITLE_FLOOR_Y][x] = '_';                  // 방바닥
+	}
+	for (int x = 66; x <= 113; x++) {
+		buf[TITLE_DESK_Y][x] = '=';                   // 책상 판
+	}
+	for (int y = TITLE_DESK_Y + 1; y < TITLE_FLOOR_Y; y++) {
+		buf[y][68] = '#';                             // 책상 다리
+		buf[y][111] = '#';
+	}
+	PutArt(buf, 92, TITLE_DESK_Y - 1, BOTTLE, 7);     // 책상 위 약병
+	PutText(buf, 89, TITLE_DESK_Y - 8, "*");          // 반짝임
+	PutText(buf, 103, TITLE_DESK_Y - 6, "*");
+	PutText(buf, 88, TITLE_DESK_Y - 3, ".");
+	PutArt(buf, 30, TITLE_FLOOR_Y - 1, SMALL_MAN, 3); // 작은 나 (게임 속 모습)
+	PutText(buf, 34, TITLE_FLOOR_Y - 5, "!");
+	PutText(buf, 37, TITLE_FLOOR_Y - 4, "저 약을 마시면...?");
+
+	// 테두리와 맨 윗줄
+	PutBox(buf, 0, 1, SCREEN_W - 1, SCREEN_H - 2);
+	PutText(buf, 2, 0, "IT 프로젝트  |  방탈출 게임");
+
+	// 시작 안내 (깜빡임) + 조작법
+	if (showPress) {
+		PutCenter(buf, TITLE_PRESS_Y, ">>   PRESS ANY KEY TO START   <<");
+	}
+	PutCenter(buf, TITLE_KEYS_Y, "<- ->  이동        SPACE  점프 (2단 점프)        Q  종료");
+}
+
+// 타이틀 화면 : 게임 제목과 "PRESS ANY KEY" 를 보여 주고 아무 키나 누를 때까지 기다린다
+// PRESS ANY KEY 문구는 0.5초마다 깜빡인다. 누른 키는 WaitCut 이 읽어서 버리므로 인트로가 바로 넘어가지 않는다
+void ShowTitle(void) {
+	char buf[SCREEN_H][SCREEN_W + 1];
+	static WORD attr[SCREEN_H][SCREEN_W];
+
+	while (_kbhit()) {   // 실행 전에 눌러 둔 키는 버린다
+		_getch();
+	}
+
+	for (int blink = 1; ; blink = !blink) {
+		BuildTitle(buf, blink);
+
+		// 방 색감 : 책상은 원목 블록, 바닥 아래(시작 안내)는 크림색 깔개
+		ThemeCut(buf, attr, 1, SCREEN_H - 2, TITLE_FLOOR_Y, -1, -1, PAL_CREAM);
+
+		// 제목 블록 : "작아진" 은 파랑, "나" 는 빨강 (밝은 벽지 위에서 눈에 띄게)
+		for (int y = TITLE_Y; y <= TITLE_BOTTOM; y++) {
+			for (int x = 1; x < SCREEN_W - 1; x++) {
+				if (buf[y][x] == '@') { buf[y][x] = ' '; attr[y][x] = ATTR(PAL_TEXT, PAL_BLUE); }
+				else if (buf[y][x] == '%') { buf[y][x] = ' '; attr[y][x] = ATTR(PAL_TEXT, PAL_RED); }
+			}
+		}
+		for (int x = 1; x < SCREEN_W - 1; x++) {
+			if (buf[TITLE_SUB_Y][x] != ' ' && buf[TITLE_SUB_Y][x] != '.' && buf[TITLE_SUB_Y][x] != '\'') attr[TITLE_SUB_Y][x] = ATTR(PAL_TEXT, PAL_WALL); // 부제 : 진한 글씨
+			attr[TITLE_PRESS_Y][x] = ATTR(PAL_RED, PAL_CREAM);                  // PRESS ANY KEY : 빨강
+		}
+		for (int y = TITLE_DESK_Y - 8; y < TITLE_DESK_Y; y++) {
+			for (int x = 85; x <= 106; x++) {
+				if (buf[y][x] != ' ' && buf[y][x] != '.' && buf[y][x] != '\'') {
+					attr[y][x] = ATTR(PAL_BLUE, PAL_WALL);                      // 약병 : 파랑
+				}
+			}
+		}
+		FlushBuffer(buf);
+		PaintCut(attr);
+
+		if (WaitCut(500) == 1) {   // 키를 누르면 시작
+			break;
+		}
+	}
 }
 
 void ShowIntro() {
@@ -563,7 +756,7 @@ int ShowEnding(Game* g) {
 	}
 
 	PutCenter(buf, CUT_TALK_LINE3, "다시 하기? ( R : 다시 / Q : 끝내기 )");
-	FlushBuffer(buf);
+	FlushCut(buf);
 
 	// R 또는 Q 가 눌릴 때까지 기다린다 (다른 키는 무시)
 	while (1) {

@@ -16,6 +16,26 @@
 #define MY_DEBUG   // [수정] __MY_DEBUG → MY_DEBUG (예약 식별자 회피). .c 의 #ifdef 도 같이 바꿀 것
 #endif
 
+/////  색 (콘솔 색 표 번호) //////
+// 실제 색은 InitGame 의 SetGamePalette 가 "실제 집 방" 느낌으로 바꿔 둔다
+#define PAL_WALL     0   // 벽지 바탕 : 연한 베이지
+#define PAL_DECOR    1   // 벽 장식 선 : 옅은 갈색
+#define PAL_BOOK_G   2   // 책 : 연두
+#define PAL_GLASS    3   // 창문 유리·그림 속 하늘 : 하늘색
+#define PAL_BOOK_R   4   // 책 : 연분홍
+#define PAL_BOOK_P   5   // 책 : 연보라
+#define PAL_WOOD_D   6   // 진한 나무 : 나뭇결, 돌
+#define PAL_TEXT     7   // 기본 글자 : 진한 회갈색
+#define PAL_ANT      8   // 개미 : 검정
+#define PAL_PATTERN  9   // 벽지 무늬 : 바탕보다 조금 진한 베이지
+#define PAL_HUD      10  // HUD 바 : 진한 원목
+#define PAL_BLUE     11  // 바람, 강조 : 파랑
+#define PAL_RED      12  // 버튼, 강조 : 빨강
+#define PAL_WOOD     13  // 원목 : 가구, 마루, 액자틀
+#define PAL_SUN      14  // 그림 속 해 : 노랑
+#define PAL_CREAM    15  // 창틀, 시계판, 말풍선 : 크림색
+#define ATTR(fg, bg) ((WORD)((fg) | ((bg) << 4)))   // 글자색 + 배경색 -> 콘솔 속성 값
+
 /////  화면·플레이어 //////
 #define SCREEN_W 120 // 콘솔 화면 크기 (가로 칸 수)
 #define SCREEN_H 36 // 콘솔 화면 크기 (세로 줄 수). 1920 x 1200 모니터 전체 화면 기준
@@ -189,6 +209,7 @@ typedef struct Game {
 // main : 프로그램 진입점. 초기화 → (처음이면) 인트로 → 게임 루프 → 엔딩 → 정리 순으로 호출하고 재시작 여부를 판단한다. [그림 1]
 int InitGame(Game* g); // 콘솔 설정, 맵 로드, 플레이어·낙하물·개미·선풍기·버튼을 시작 상태로 초기화한다 성공하면 1, 맵 파일을 열지 못하면 안내를 보여 준 뒤 0 을 반환한다. [그림 2]
 int LoadMap(Map* m, int stage); // Map *m  - map.txt 를 한 줄씩 읽어 tile[][] 에 채운다. 성공하면 1, 파일을 열지 못하면 0 을 반환한다
+void ShowTitle(void); // 타이틀 화면 : 큰 제목 "작아진 나" 와 깜빡이는 PRESS ANY KEY 를 보여 주고, 아무 키나 누를 때까지 기다린다
 void ShowIntro(void); // [수정] () → (void). 약을 마시고 작아지는 4컷 인트로 만화를 출력한다. 어느 컷에서든 키를 누르면 조작법 안내로 건너뛴다. [그림 3]
 void DrawCut(int cut, int k); // 컷만화 한 컷(테두리 + 그림 + 대사)을 화면에 그린다. k 는 3컷·엔딩 2컷에서 사람의 크기(1~3), 그밖의 컷은 0 이다
 int WaitCut(int ms); //ms 동안 대기하되 CUT_SLICE_MS(10ms) 씩 나눠 자며 키를 확인한다. 키가 눌렸으면 그 키를 읽어서 버리고 1 을 반환한다.단일 스레드에서 한 번에 오래 자면 그 동안 키를 받지 못하기 때문이다. 인트로·엔딩(게임 루프 밖)에서만 쓴다.

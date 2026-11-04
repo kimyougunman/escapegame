@@ -513,6 +513,253 @@ static void FlushBufferColor(char buf[][SCREEN_W + 1], WORD attr[][SCREEN_W]) {
     WriteConsoleOutputA(h, cells, size, from, &area);
 }
 
+/////  방 꾸미기 (벽지·창문·시계·액자·가구·마루) //////
+// 장식 위치는 숫자로 박지 않고 맵에서 찾는다. 그래서 map.txt 에서 장식을 옮겨도 색이 따라간다
+// 움직이는 물체(돌·개미·플레이어·바람)가 장식 앞을 지나가면 물체는 그대로 두고 뒤 배경색만 이어지게 한다
+
+typedef struct DecorRect {
+    int x1, y1, x2, y2;   // 맵 좌표 (테두리 포함)
+    int picture;          // 안에 '^' 가 있으면 1 (액자), 없으면 0 (창문)
+} DecorRect;
+
+#define MAX_DECOR 8
+
+// 화면 칸 (x, 화면 y) 가 맵 글자 그대로인가 (물체가 덮어쓰지 않았는가)
+static int Untouched(char buf[][SCREEN_W + 1], Game* g, int x, int my) {
+    return buf[my + 1][x] == g->map.tile[my][x];
+}
+
+// 맵에서 '+' 모서리로 된 사각형 장식(창문·액자)을 찾는다. 찾은 개수를 반환한다
+static int FindDecorRects(Map* m, DecorRect out[], int maxCount) {
+    int n = 0;
+
+    for (int y = 0; y < MAP_H - 1; y++) {
+        for (int x = 0; x < MAP_W - 1; x++) {
+            int inside = 0;
+
+            if (m->tile[y][x] != '+' || m->tile[y][x + 1] != '-' || m->tile[y + 1][x] != '|') {
+                continue;
+            }
+            for (int i = 0; i < n; i++) {   // 이미 찾은 사각형의 일부 (창문 가운데 십자 등)
+                if (x >= out[i].x1 && x <= out[i].x2 && y >= out[i].y1 && y <= out[i].y2) inside = 1;
+            }
+            if (inside || n >= maxCount) {
+                continue;
+            }
+
+            int x2 = x, y2 = y;
+            for (int i = x + 1; i < MAP_W && (m->tile[y][i] == '-' || m->tile[y][i] == '+'); i++) {
+                if (m->tile[y][i] == '+') x2 = i;          // 오른쪽 끝 모서리
+            }
+            for (int j = y + 1; j < MAP_H && (m->tile[j][x] == '|' || m->tile[j][x] == '+'); j++) {
+                if (m->tile[j][x] == '+') y2 = j;          // 아래쪽 끝 모서리
+            }
+            if (x2 == x || y2 == y || m->tile[y2][x2] != '+') {
+                continue;
+            }
+
+            out[n].x1 = x; out[n].y1 = y; out[n].x2 = x2; out[n].y2 = y2; out[n].picture = 0;
+            for (int j = y; j <= y2; j++)
+                for (int i = x; i <= x2; i++)
+                    if (m->tile[j][i] == '^') out[n].picture = 1;
+            n++;
+        }
+    }
+    return n;
+}
+
+// 칸 (x, y) 가 찾은 사각형 장식 안인가
+static int InDecorRect(DecorRect r[], int n, int x, int y) {
+    for (int i = 0; i < n; i++) {
+        if (x >= r[i].x1 && x <= r[i].x2 && y >= r[i].y1 && y <= r[i].y2) return 1;
+    }
+    return 0;
+}
+
+// 맵에서 시계("12" 가 있는 곳)를 찾아 줄마다 왼쪽·오른쪽 끝을 구한다. 시계가 없으면 0
+static int FindClock(Map* m, int* top, int* bottom, int left[], int right[]) {
+    int cx = -1, cy = -1;
+
+    for (int y = 0; y < MAP_H && cx < 0; y++)
+        for (int x = 0; x < MAP_W - 1; x++)
+            if (m->tile[y][x] == '1' && m->tile[y][x + 1] == '2') { cx = x; cy = y; break; }
+    if (cx < 0) {
+        return 0;
+    }
+
+    *top = cy - 1;
+    *bottom = cy;
+    for (int y = cy + 1; y < MAP_H; y++)            // 아래쪽 '6' 을 찾고 그 아랫줄까지가 시계
+        for (int x = cx - 2; x <= cx + 3; x++)
+            if (x >= 0 && x < MAP_W && m->tile[y][x] == '6') *bottom = y + 1;
+    if (*top < 0 || *bottom >= MAP_H) {
+        return 0;
+    }
+
+    for (int y = *top; y <= *bottom; y++) {
+        left[y] = -1; right[y] = -1;
+        for (int x = cx - 16; x <= cx + 17; x++) {
+            if (x < 1 || x >= MAP_W - 1) continue;
+            char c = m->tile[y][x];
+            if (c != ' ' && c != '#' && c != '=' && c != 'F' && c != 'B' && c != '*') {
+                if (left[y] < 0) left[y] = x;
+                right[y] = x;
+            }
+        }
+    }
+    return 1;
+}
+
+// 방 꾸미기 : ColorScene 이 정한 물체 색 위에 벽지·창문·시계·액자·가구·마루를 입힌다
+static void DrawRoom(char buf[][SCREEN_W + 1], WORD attr[][SCREEN_W], Game* g) {
+    Map* m = &g->map;
+    DecorRect rects[MAX_DECOR];
+    int nRect = FindDecorRects(m, rects, MAX_DECOR);
+    int clockTop = 0, clockBottom = -1, clockL[MAP_H], clockR[MAP_H];
+    int hasClock = FindClock(m, &clockTop, &clockBottom, clockL, clockR);
+
+    // 1) 창문 : 흰 창틀 + 하늘색 유리
+    for (int i = 0; i < nRect; i++) {
+        DecorRect* r = &rects[i];
+        if (r->picture) continue;
+        for (int y = r->y1; y <= r->y2; y++) {
+            for (int x = r->x1; x <= r->x2; x++) {
+                char c = m->tile[y][x];
+                int frame = (c == '|' || c == '+' || c == '-');
+                if (Untouched(buf, g, x, y)) {
+                    buf[y + 1][x] = frame ? ((c == '-') ? '=' : ' ') : c;
+                    attr[y + 1][x] = frame ? ATTR(PAL_WOOD_D, PAL_CREAM) : ATTR(PAL_CREAM, PAL_GLASS);
+                }
+                else {
+                    attr[y + 1][x] = (WORD)((attr[y + 1][x] & 0x0F) | ((frame ? PAL_CREAM : PAL_GLASS) << 4));
+                }
+            }
+        }
+    }
+
+    // 2) 액자 : 원목 틀 + 크림색 여백 + 그림 (하늘·해·들판)
+    for (int i = 0; i < nRect; i++) {
+        DecorRect* r = &rects[i];
+        int sunRow = -1, sunL = 0, sunR = 0, landTop = r->y2;
+        if (!r->picture) continue;
+
+        for (int y = r->y1 + 2; y <= r->y2 - 2; y++) {   // 해 : '(' 와 ')' 가 있는 줄 / 들판 : 처음 '^' 가 나오는 줄부터
+            int l = -1, rr = -1;
+            for (int x = r->x1 + 4; x <= r->x2 - 4; x++) {
+                if (m->tile[y][x] == '(') l = x;
+                if (m->tile[y][x] == ')') rr = x;
+                if (m->tile[y][x] == '^' && y < landTop) landTop = y;
+            }
+            if (l >= 0 && rr > l && sunRow < 0) { sunRow = y; sunL = l; sunR = rr; }
+        }
+
+        for (int y = r->y1; y <= r->y2; y++) {
+            for (int x = r->x1; x <= r->x2; x++) {
+                WORD bg;
+                int keepChar = 0;
+                if (y == r->y1 || y == r->y2 || x == r->x1 || x == r->x2) bg = PAL_WOOD;                   // 바깥 틀
+                else if (y == r->y1 + 1 || y == r->y2 - 1 || x <= r->x1 + 3 || x >= r->x2 - 3) bg = PAL_CREAM; // 여백
+                else if (sunRow >= 0 && ((y == sunRow && x >= sunL && x <= sunR) ||
+                         ((y == sunRow - 1 || y == sunRow + 1) && x > sunL && x < sunR))) bg = PAL_SUN;        // 동그란 해
+                else if (y < landTop) bg = PAL_GLASS;                                                          // 하늘
+                else { bg = PAL_BOOK_G; keepChar = (m->tile[y][x] == '^'); }                                    // 들판과 산
+
+                if (Untouched(buf, g, x, y)) {
+                    buf[y + 1][x] = keepChar ? '^' : ' ';
+                    attr[y + 1][x] = ATTR(PAL_WOOD_D, bg);
+                }
+                else {
+                    attr[y + 1][x] = (WORD)((attr[y + 1][x] & 0x0F) | (bg << 4));
+                }
+            }
+        }
+    }
+
+    // 3) 벽시계 : 원목 테두리 + 크림색 시계판 (숫자는 진하게, 바늘은 진한 갈색)
+    if (hasClock) {
+        for (int y = clockTop; y <= clockBottom; y++) {
+            if (clockL[y] < 0) continue;
+            for (int x = clockL[y]; x <= clockR[y]; x++) {
+                char c = m->tile[y][x];
+                int rim = (y == clockTop || y == clockBottom || x == clockL[y] || x == clockR[y] ||
+                           c == '.' || c == '\'' || (c == '-' && (y <= clockTop + 1 || y >= clockBottom - 1)));
+                WORD bg = rim ? PAL_WOOD : PAL_CREAM;
+
+                if (Untouched(buf, g, x, y)) {
+                    if (rim) buf[y + 1][x] = ' ';
+                    attr[y + 1][x] = ATTR((c >= '0' && c <= '9') ? PAL_TEXT : PAL_WOOD_D, bg);
+                }
+                else {
+                    attr[y + 1][x] = (WORD)((attr[y + 1][x] & 0x0F) | (bg << 4));
+                }
+            }
+        }
+    }
+
+    // 4) 발판 : 긴 것(30칸 이상)은 원목 판, 짧은 것은 파스텔 책 (빨강·연두·보라를 번갈아)
+    {
+        const WORD books[3] = { PAL_BOOK_R, PAL_BOOK_G, PAL_BOOK_P };
+        int bookIdx = 0;
+        for (int y = 0; y < MAP_H; y++) {
+            int x = 0;
+            while (x < MAP_W) {
+                if (m->tile[y][x] != '=') { x++; continue; }
+                int s = x;
+                while (x < MAP_W && m->tile[y][x] == '=') x++;
+                int longBoard = (x - s >= 30);
+                WORD bg = longBoard ? PAL_WOOD : books[bookIdx++ % 3];
+                for (int i = s; i < x; i++) {
+                    buf[y + 1][i] = longBoard ? '_' : (((i - s) % 3 == 0) ? '|' : ' ');   // 나뭇결 / 책과 책 사이
+                    attr[y + 1][i] = ATTR(PAL_WOOD_D, bg);
+                }
+            }
+        }
+    }
+
+    // 5) 바닥(맵 맨 아랫줄)은 원목 마루, 양옆 벽은 원목 기둥
+    for (int x = 0; x < MAP_W; x++) {
+        if (m->tile[MAP_H - 1][x] == '#') {
+            buf[MAP_H][x] = (x % 7 == 0) ? '|' : '_';
+            attr[MAP_H][x] = ATTR(PAL_WOOD_D, PAL_WOOD);
+        }
+    }
+    for (int y = 0; y < MAP_H - 1; y++) {
+        for (int x = 0; x < MAP_W; x += MAP_W - 1) {
+            if (m->tile[y][x] == '#') {
+                buf[y + 1][x] = ' ';
+                attr[y + 1][x] = ATTR(PAL_WOOD_D, PAL_WOOD);
+            }
+        }
+    }
+
+    // 6) 약병(목표)은 빨갛게 강조
+    if (g->map.goalY >= 0 && g->map.goalY < MAP_H && Untouched(buf, g, g->map.goalX, g->map.goalY)) {
+        attr[g->map.goalY + 1][g->map.goalX] = ATTR(PAL_RED, PAL_WALL);
+    }
+
+    // 7) 벽지 : 남은 빈 벽에 옅은 꽃무늬 (작은 꽃 * 와 점 . ' 을 엇갈리게)
+    for (int y = 0; y < MAP_H - 1; y++) {
+        int sy = y + 1;
+        for (int x = 1; x < MAP_W - 1; x++) {
+            char c = ' ';
+            if (buf[sy][x] != ' ' || (attr[sy][x] >> 4) != PAL_WALL || InDecorRect(rects, nRect, x, y)) continue;
+            if (hasClock && y >= clockTop && y <= clockBottom && clockL[y] >= 0 && x >= clockL[y] && x <= clockR[y]) continue;
+            if (sy % 4 == 1 && x % 8 == 2) c = '*';
+            else if (sy % 4 == 3 && x % 8 == 6) c = '.';
+            else if (sy % 4 == 3 && x % 8 == 2) c = '\'';
+            if (c != ' ') {
+                buf[sy][x] = c;
+                attr[sy][x] = ATTR(PAL_PATTERN, PAL_WALL);
+            }
+        }
+    }
+
+    // 8) HUD : 진한 원목 바 + 크림색 글씨
+    for (int x = 0; x < SCREEN_W; x++) {
+        attr[0][x] = ATTR(PAL_CREAM, PAL_HUD);
+    }
+}
+
 void Render(Game* g) {
 
     char buf[SCREEN_H][SCREEN_W + 1];// 실제 콘솔에 출력하기 전 그림을 저장할 임시 화면 버퍼(각 행에 문자열 종료 문자 공간(+1)을 추가)
@@ -531,6 +778,8 @@ void Render(Game* g) {
     DrawHUD(buf, g); // 화면 맨 윗줄에 HP, 선풍기 상태, 경과 시간 표시
 
     ColorScene(attr, g); // 칸마다 색 정하기 (버튼 빨강, 바람 파랑)
+
+    DrawRoom(buf, attr, g); // 방 꾸미기 (벽지·창문·시계·액자·가구·마루)
 
     FlushBufferColor(buf, attr); // 완성된 화면을 글자와 색으로 콘솔에 한 번에 출력
 }

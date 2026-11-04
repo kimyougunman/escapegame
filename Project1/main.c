@@ -91,7 +91,7 @@ static void PlaceConsoleWindow(HANDLE h) {
 }
 
 // 콘솔 색 표의 두 자리를 게임용 색으로 바꾼다 (기본 16색에는 갈색이 없고, 검은 바탕에서 완전한 검정 글자는 보이지 않는다)
-//  6번(진한 노랑) -> 갈색 : 돌      8번(진회색) -> 검정에 가까운 회색 : 개미      1번(진한 파랑) -> 어두운 청회색 : 배경 장식
+//  16색 모두를 "실제 집 방" 색감으로 바꾼다 (번호별 용도는 game.h 의 PAL_xxx)
 static void SetGamePalette(HANDLE h) {
 	CONSOLE_SCREEN_BUFFER_INFOEX info;
 
@@ -99,9 +99,23 @@ static void SetGamePalette(HANDLE h) {
 	if (!GetConsoleScreenBufferInfoEx(h, &info)) {
 		return;   // Windows Terminal 등 색 표를 바꿀 수 없는 콘솔이면 그대로
 	}
-	info.ColorTable[6] = RGB(150, 90, 40);   // 갈색
-	info.ColorTable[8] = RGB(90, 90, 90);    // 검정에 가까운 진회색
-	info.ColorTable[1] = RGB(70, 80, 110);   // 1번(진한 파랑) -> 어두운 청회색 : 배경 장식
+	// 실제 집 방 느낌 : 연한 벽지 바탕에 진한 글자 (PAL_xxx 번호는 game.h)
+	info.ColorTable[PAL_WALL]    = RGB(238, 229, 211);  // 벽지 바탕 : 연한 베이지
+	info.ColorTable[PAL_DECOR]   = RGB(150, 132, 112);  // 벽 장식 선 : 옅은 갈색
+	info.ColorTable[PAL_BOOK_G]  = RGB(166, 200, 166);  // 책 : 연두
+	info.ColorTable[PAL_GLASS]   = RGB(196, 222, 240);  // 유리·하늘 : 하늘색
+	info.ColorTable[PAL_BOOK_R]  = RGB(226, 160, 150);  // 책 : 연분홍
+	info.ColorTable[PAL_BOOK_P]  = RGB(190, 174, 220);  // 책 : 연보라
+	info.ColorTable[PAL_WOOD_D]  = RGB(150, 108, 70);   // 진한 나무 : 나뭇결, 돌
+	info.ColorTable[PAL_TEXT]    = RGB(70, 62, 56);     // 기본 글자 : 진한 회갈색
+	info.ColorTable[PAL_ANT]     = RGB(40, 36, 36);     // 개미 : 검정 (밝은 바탕이라 잘 보인다)
+	info.ColorTable[PAL_PATTERN] = RGB(222, 207, 182);  // 벽지 무늬
+	info.ColorTable[PAL_HUD]     = RGB(128, 104, 82);   // HUD 바 : 진한 원목
+	info.ColorTable[PAL_BLUE]    = RGB(92, 150, 205);   // 바람 : 파랑
+	info.ColorTable[PAL_RED]     = RGB(205, 70, 70);    // 버튼 : 빨강
+	info.ColorTable[PAL_WOOD]    = RGB(214, 178, 136);  // 원목 : 밝은 나무
+	info.ColorTable[PAL_SUN]     = RGB(250, 214, 110);  // 해 : 노랑
+	info.ColorTable[PAL_CREAM]   = RGB(252, 250, 244);  // 크림색 (창틀·시계판·말풍선)
 	info.srWindow.Right++;                   // SetConsoleScreenBufferInfoEx 는 창을 한 칸씩 줄이는 버릇이 있어 보정한다
 	info.srWindow.Bottom++;
 	SetConsoleScreenBufferInfoEx(h, &info);
@@ -145,6 +159,7 @@ int InitGame(Game* g){
 	win.Bottom = rows - 1;
 	SetConsoleWindowInfo(h, TRUE, &win);  // 3 창을 버퍼 크기에 맞춤
 	system("cls");                        //   남는 줄을 깨끗하게 (이전 출력이 남지 않도록)
+	ShowScrollBar(GetConsoleWindow(), SB_BOTH, FALSE); // 스크롤할 것이 없는데도 생기는 스크롤바 숨기기 (120칸이 화면 폭에 딱 맞아서 오른쪽 끝 칸을 가린다)
 	if (!fullscreen) {
 		PlaceConsoleWindow(h);            // 4 (테두리 없는 창일 때만) 화면 가운데로
 	}
@@ -345,6 +360,7 @@ int main(int argc, char* argv[]) {
 			CloseGame(&g); return 0;
 		}
 		if (firstRun){
+			ShowTitle(); // 타이틀 화면 (아무 키나 누르면 시작)
 			ShowIntro(); // 인트로 표시 
 			firstRun = 0;
 		}
