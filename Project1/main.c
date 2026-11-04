@@ -246,8 +246,8 @@ void UpdateGame(Game* g){
 	if (g->p.invTick > 0){
 		g->p.invTick -=1;
 	}
-	if (g->frame > 0 && g->frame % HP_DRAIN_TICK == 0) {
-		g->p.hp -= 1;   // 20초가 지날 때마다 HP 1 감소 (무적과 상관없이). 0 이 되면 아래에서 게임 오버
+	if (g->frame >= TIME_LIMIT_TICK) {
+		g->p.hp = 0;    // 제한 시간(20초) 안에 약병에 가지 못하면 즉사 (무적과 상관없이). 아래에서 게임 오버
 	}
 	UpdateButtons(g);
 	UpdateFans(g);

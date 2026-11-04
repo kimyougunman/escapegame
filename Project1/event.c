@@ -751,7 +751,12 @@ int ShowEnding(Game* g) {
 	else {
 		// 게임 오버
 		BuildCut(buf, CUT_GAMEOVER, 0);
-		snprintf(line, sizeof(line), "버틴 시간 : %lu 초", g->frame * FRAME_MS / 1000);
+		if (g->frame > TIME_LIMIT_TICK) {    // 시간 초과로 죽었으면 (게임 루프가 죽은 프레임 뒤에 frame 을 1 올리므로 >)
+			snprintf(line, sizeof(line), "시간 초과! %d 초 안에 약병에 가지 못했어...", TIME_LIMIT_SEC);
+		}
+		else {
+			snprintf(line, sizeof(line), "버틴 시간 : %lu 초", g->frame * FRAME_MS / 1000);
+		}
 		PutCenter(buf, CUT_TALK_LINE2, line);
 	}
 

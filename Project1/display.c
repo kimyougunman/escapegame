@@ -61,9 +61,28 @@ int LoadMap(Map* m, int stage) {
     FILE* fp;               // 맵 파일을 가리키는 파일 포인터
     char line[MAP_W + 2];   // 파일에서 읽은 한 줄을 임시로 저장하는 배열(+2는 줄바꿈 문자(\n) 와 문자열 종료 문자(\0) 공간)
 
-    fp = fopen("map.txt", "r"); // map.txt 파일을 읽기 모드("r")로 열기
+    fp = fopen("map.txt", "r"); // map.txt 파일을 읽기 모드("r")로 열기 (현재 작업 폴더 기준)
 
-    // 파일을 열지 못하면 실패 반환
+    // 못 열었으면 실행 파일(.exe)이 있는 폴더, 그 위 폴더들에서도 찾아본다
+    // (exe 를 더블클릭하면 작업 폴더가 x64\Debug 가 되어 프로젝트 폴더의 map.txt 를 못 찾기 때문)
+    if (fp == NULL) {
+        wchar_t path[MAX_PATH];
+        DWORD len = GetModuleFileNameW(NULL, path, MAX_PATH); // exe 의 전체 경로 (한글 폴더 때문에 W 버전)
+        for (int up = 0; fp == NULL && len > 0 && up < 4; up++) {
+            wchar_t* slash = wcsrchr(path, L'\\');            // 마지막 폴더 구분자
+            if (slash == NULL) break;
+            *slash = L'\0';                                    // 한 단계 위 폴더로
+            wchar_t file[MAX_PATH];
+            swprintf(file, MAX_PATH, L"%ls\\map.txt", path);
+            fp = _wfopen(file, L"r");
+            if (fp == NULL) {                                  // 바깥 솔루션(.slnx)으로 빌드한 경우 : 그 폴더의 Project1\map.txt
+                swprintf(file, MAX_PATH, L"%ls\\Project1\\map.txt", path);
+                fp = _wfopen(file, L"r");
+            }
+        }
+    }
+
+    // 그래도 파일을 열지 못하면 실패 반환
     if (fp == NULL) {
         return 0;
     }
@@ -390,13 +409,12 @@ void DrawHUD(char buf[][SCREEN_W + 1], Game* g) {
     snprintf(
         hud,
         sizeof(hud),
-        "HP: %d/%d | FAN1: %s | FAN2: %s | TIME: %u sec | HP -1 in %u sec",
+        "HP: %d/%d | FAN1: %s | FAN2: %s | TIME LEFT: %u sec",
         g->p.hp,      // 현재 플레이어 체력
         PLAYER_MAX_HP,  // 플레이어 최대 체력
         fan1,           // 첫 번째 선풍기 상태
         fan2,           // 두 번째 선풍기 상태
-        seconds,        // 게임 경과 시간(초)
-        (unsigned int)(HP_DRAIN_SEC - seconds % HP_DRAIN_SEC) // 다음 HP 감소까지 남은 시간(초)
+        (unsigned int)(seconds < TIME_LIMIT_SEC ? TIME_LIMIT_SEC - seconds : 0) // 남은 시간(초). 0 이 되면 즉사
     );
 
     memcpy(buf[0], hud, strlen(hud)); // 완성된 HUD 문자열을 화면 버퍼의 첫 번째 줄에 복사
@@ -757,6 +775,18 @@ static void DrawRoom(char buf[][SCREEN_W + 1], WORD attr[][SCREEN_W], Game* g) {
     // 8) HUD : 진한 원목 바 + 크림색 글씨
     for (int x = 0; x < SCREEN_W; x++) {
         attr[0][x] = ATTR(PAL_CREAM, PAL_HUD);
+    }
+
+    // 9) 남은 시간이 5초 이하 : 화면 테두리(HUD 줄·양옆 기둥·바닥 마루)가 빨갛게 깜빡인다 (1초에 4번)
+    if (g->frame + TIME_WARN_TICK >= TIME_LIMIT_TICK && (g->frame / 5) % 2 == 0) {
+        for (int x = 0; x < SCREEN_W; x++) {
+            attr[0][x] = ATTR(PAL_CREAM, PAL_RED);              // HUD 줄
+            attr[MAP_H][x] = ATTR(PAL_CREAM, PAL_RED);          // 바닥 마루
+        }
+        for (int y = 1; y < MAP_H; y++) {
+            attr[y][0] = ATTR(PAL_CREAM, PAL_RED);              // 왼쪽 기둥
+            attr[y][MAP_W - 1] = ATTR(PAL_CREAM, PAL_RED);      // 오른쪽 기둥
+        }
     }
 }
 
