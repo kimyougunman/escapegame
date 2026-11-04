@@ -1,4 +1,5 @@
 ﻿#include "game.h"
+#include "bgm.h" // 배경 음악 (BgmStart / BgmStop)
 
 
 void CheckGoal(Game* g){
@@ -360,6 +361,7 @@ int main(int argc, char* argv[]) {
 			CloseGame(&g); return 0;
 		}
 		if (firstRun){
+			BgmStart(); // 배경 음악 시작 (타이틀부터 계속 반복. 다시 하기를 해도 끊기지 않는다)
 			ShowTitle(); // 타이틀 화면 (아무 키나 누르면 시작)
 			ShowIntro(); // 인트로 표시 
 			firstRun = 0;
@@ -375,7 +377,8 @@ int main(int argc, char* argv[]) {
 		}
 		
 	}
-	// 게임 종료 
+	// 게임 종료
+	BgmStop(); // 배경 음악 정지
 	CloseGame(&g);
 	return 0; 
 	 
