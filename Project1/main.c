@@ -248,7 +248,7 @@ void UpdateGame(Game* g){
 		g->p.invTick -=1;
 	}
 	if (g->frame >= TIME_LIMIT_TICK) {
-		g->p.hp = 0;    // 제한 시간(20초) 안에 약병에 가지 못하면 즉사 (무적과 상관없이). 아래에서 게임 오버
+		g->p.hp = 0;    // 제한 시간(TIME_LIMIT_SEC = 30초) 안에 약병에 가지 못하면 즉사 (무적과 상관없이). 아래에서 게임 오버
 	}
 	UpdateButtons(g);
 	UpdateFans(g);

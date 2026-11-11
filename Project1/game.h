@@ -44,10 +44,10 @@
 #define PLAYER_H 3 // 작아진 플레이어의 세로 크기 (머리 + 몸 + 다리)
 #define PLAYER_W 3 // 플레이어의 가로 크기
 #define PLAYER_HALF (PLAYER_W / 2) // 발 가운데(p.x)에서 몸 양 끝까지의 칸 수 (= 1)
-#define PLAYER_MAX_HP 3 // 시작 체력
+#define PLAYER_MAX_HP 5 // 시작 체력
 #define FRAME_MS 50 // 한 프레임 시간(ms). 약 20FPS
-#define TIME_LIMIT_SEC 20 // 제한 시간(초). 이 안에 약병에 가지 못하면 즉사 (게임 오버)
-#define TIME_LIMIT_TICK (TIME_LIMIT_SEC * 1000 / FRAME_MS) // 위 시간을 프레임으로 (20초 = 400프레임)
+#define TIME_LIMIT_SEC 30 // 제한 시간(초). 이 안에 약병에 가지 못하면 즉사 (게임 오버)
+#define TIME_LIMIT_TICK (TIME_LIMIT_SEC * 1000 / FRAME_MS) // 위 시간을 프레임으로 (30초 = 600프레임)
 #define TIME_WARN_SEC 5 // 남은 시간이 이 초 이하면 화면 테두리가 빨갛게 깜빡인다
 #define TIME_WARN_TICK (TIME_WARN_SEC * 1000 / FRAME_MS) // 위 시간을 프레임으로 (5초 = 100프레임)
 #define INV_TICK 20 // 피격 후 무적 시간(프레임). 약 1초
