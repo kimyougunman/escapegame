@@ -1,18 +1,17 @@
 ﻿#include "game.h"
-#include "bgm.h" // 배경 음악 (BgmStart / BgmStop)
+#include "bgm.h"
 
 
 void CheckGoal(Game* g){
-	
-	if (abs(g->p.x - g->map.goalX) <= PLAYER_HALF && g->p.y == g->map.goalY && g->p.onGround) g->holdTick+=1; // 약병이 발 3칸 안에 있고 서 있으면
+
+	if (abs(g->p.x - g->map.goalX) <= PLAYER_HALF && g->p.y == g->map.goalY && g->p.onGround) g->holdTick+=1; // 약병 앞에 서있으면
 	else g->holdTick = 0;
 	if (g->holdTick>= DRINK_TICK){
 		g->state = ST_CLEAR;
 	}
 }
 
-// 콘솔 창의 제목 표시줄·테두리를 없애거나(on = 1) 원래대로 되돌린다(on = 0)
-// 테두리 없는 전체 화면용. Windows Terminal 에서는 효과가 없다
+// 창 테두리 없애기 (on = 1) / 되돌리기 (on = 0)
 static void SetConsoleBorderless(int on) {
 	HWND hwnd = GetConsoleWindow();
 	LONG style;
@@ -22,20 +21,19 @@ static void SetConsoleBorderless(int on) {
 	}
 	style = GetWindowLong(hwnd, GWL_STYLE);
 	if (on) {
-		style &= ~WS_OVERLAPPEDWINDOW;  // 제목 표시줄, 테두리, 최소화·최대화·닫기 버튼 제거
+		style &= ~WS_OVERLAPPEDWINDOW;
 	}
 	else {
-		style |= WS_OVERLAPPEDWINDOW;   // 보통 창 모양으로 되돌리기
+		style |= WS_OVERLAPPEDWINDOW;
 	}
 	SetWindowLong(hwnd, GWL_STYLE, style);
-	SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED); // 바뀐 모양 적용
+	SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
 
-// 120 x 36 화면이 모니터 전체를 최대한 채우도록 콘솔 글꼴 크기를 자동으로 키운다
-// 칸 수(SCREEN_W x SCREEN_H)는 그대로 두고 글자만 커진다. Windows Terminal 처럼 글꼴을 바꿀 수 없는 콘솔에서는 아무 일도 하지 않는다
+// 화면에 120 x 36이 꽉 차게 글꼴 크기 맞추기
 static void FitConsoleFont(HANDLE h) {
 	CONSOLE_FONT_INFOEX font;
-	COORD largest;             // 지금 글꼴로 콘솔 창이 가질 수 있는 최대 칸 수
+	COORD largest;
 	int fontH;
 
 	font.cbSize = sizeof(font);
@@ -43,14 +41,13 @@ static void FitConsoleFont(HANDLE h) {
 		return;
 	}
 	if (!(font.FontFamily & TMPF_TRUETYPE)) {
-		lstrcpynW(font.FaceName, L"굴림체", LF_FACESIZE); // 래스터 글꼴은 크기를 못 바꾸므로 한글 고정폭 글꼴로 바꾼다
+		lstrcpynW(font.FaceName, L"굴림체", LF_FACESIZE);
 	}
 	font.FontWeight = FW_NORMAL;
 
-	// 화면 높이로 계산한 가장 큰 글꼴부터 한 단계씩 줄여 가며, 120 x 36 이 화면에 다 들어가는 크기를 찾는다
-	// "다 들어가는가" 는 콘솔이 직접 알려 주는 최대 칸 수로 판단한다 (Windows 배율 125% 등도 콘솔이 알아서 반영)
+	// 큰 글꼴부터 줄여가면서 화면에 다 들어가는 크기 찾기
 	for (fontH = GetSystemMetrics(SM_CYSCREEN) / SCREEN_H; fontH >= 8; fontH--) {
-		font.dwFontSize.X = 0;            // 0 이면 높이에 맞는 너비를 자동으로 고른다
+		font.dwFontSize.X = 0;
 		font.dwFontSize.Y = (SHORT)fontH;
 		if (!SetCurrentConsoleFontEx(h, FALSE, &font)) {
 			return;
@@ -63,8 +60,7 @@ static void FitConsoleFont(HANDLE h) {
 	}
 }
 
-// 콘솔 창을 화면 가운데에 놓는다
-// 콘솔은 창 크기를 조금 늦게 반영하므로, 지금 창 크기를 읽지 않고 글꼴 크기로 계산한다
+// 창을 화면 가운데로
 static void PlaceConsoleWindow(HANDLE h) {
 	HWND hwnd = GetConsoleWindow();
 	CONSOLE_FONT_INFOEX font;
@@ -81,55 +77,52 @@ static void PlaceConsoleWindow(HANDLE h) {
 	}
 	r.left = 0;
 	r.top = 0;
-	r.right = font.dwFontSize.X * (info.srWindow.Right - info.srWindow.Left + 1);   // 글자 영역 크기 (가로 칸 x 세로 줄)
+	r.right = font.dwFontSize.X * (info.srWindow.Right - info.srWindow.Left + 1);
 	r.bottom = font.dwFontSize.Y * (info.srWindow.Bottom - info.srWindow.Top + 1);
-	AdjustWindowRectEx(&r, (DWORD)GetWindowLong(hwnd, GWL_STYLE), FALSE, (DWORD)GetWindowLong(hwnd, GWL_EXSTYLE)); // 남은 테두리가 있으면 포함
+	AdjustWindowRectEx(&r, (DWORD)GetWindowLong(hwnd, GWL_STYLE), FALSE, (DWORD)GetWindowLong(hwnd, GWL_EXSTYLE));
 
-	SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);  // 작업 표시줄을 뺀 영역 (작업 표시줄에 가리지 않게)
+	SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);  // 작업표시줄 빼고
 	x = work.left + ((work.right - work.left) - (r.right - r.left)) / 2;
 	y = work.top + ((work.bottom - work.top) - (r.bottom - r.top)) / 2;
-	SetWindowPos(hwnd, HWND_TOP, x > 0 ? x : 0, y > 0 ? y : 0, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW); // 크기는 콘솔이 정한 그대로, 위치만 옮긴다
+	SetWindowPos(hwnd, HWND_TOP, x > 0 ? x : 0, y > 0 ? y : 0, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
 }
 
-// 콘솔 색 표의 두 자리를 게임용 색으로 바꾼다 (기본 16색에는 갈색이 없고, 검은 바탕에서 완전한 검정 글자는 보이지 않는다)
-//  16색 모두를 "실제 집 방" 색감으로 바꾼다 (번호별 용도는 game.h 의 PAL_xxx)
+// 콘솔 16색을 방 느낌 색으로 바꿈 (번호는 game.h)
 static void SetGamePalette(HANDLE h) {
 	CONSOLE_SCREEN_BUFFER_INFOEX info;
 
 	info.cbSize = sizeof(info);
 	if (!GetConsoleScreenBufferInfoEx(h, &info)) {
-		return;   // Windows Terminal 등 색 표를 바꿀 수 없는 콘솔이면 그대로
+		return;
 	}
-	// 실제 집 방 느낌 : 연한 벽지 바탕에 진한 글자 (PAL_xxx 번호는 game.h)
-	info.ColorTable[PAL_WALL]    = RGB(238, 229, 211);  // 벽지 바탕 : 연한 베이지
-	info.ColorTable[PAL_DECOR]   = RGB(150, 132, 112);  // 벽 장식 선 : 옅은 갈색
-	info.ColorTable[PAL_BOOK_G]  = RGB(166, 200, 166);  // 책 : 연두
-	info.ColorTable[PAL_GLASS]   = RGB(196, 222, 240);  // 유리·하늘 : 하늘색
-	info.ColorTable[PAL_BOOK_R]  = RGB(226, 160, 150);  // 책 : 연분홍
-	info.ColorTable[PAL_BOOK_P]  = RGB(190, 174, 220);  // 책 : 연보라
-	info.ColorTable[PAL_WOOD_D]  = RGB(150, 108, 70);   // 진한 나무 : 나뭇결, 돌
-	info.ColorTable[PAL_TEXT]    = RGB(70, 62, 56);     // 기본 글자 : 진한 회갈색
-	info.ColorTable[PAL_ANT]     = RGB(40, 36, 36);     // 개미 : 검정 (밝은 바탕이라 잘 보인다)
+	info.ColorTable[PAL_WALL]    = RGB(238, 229, 211);  // 벽지
+	info.ColorTable[PAL_DECOR]   = RGB(150, 132, 112);
+	info.ColorTable[PAL_BOOK_G]  = RGB(166, 200, 166);  // 책
+	info.ColorTable[PAL_GLASS]   = RGB(196, 222, 240);  // 유리, 하늘
+	info.ColorTable[PAL_BOOK_R]  = RGB(226, 160, 150);
+	info.ColorTable[PAL_BOOK_P]  = RGB(190, 174, 220);
+	info.ColorTable[PAL_WOOD_D]  = RGB(150, 108, 70);   // 진한 나무
+	info.ColorTable[PAL_TEXT]    = RGB(70, 62, 56);     // 글자
+	info.ColorTable[PAL_ANT]     = RGB(40, 36, 36);     // 개미
 	info.ColorTable[PAL_PATTERN] = RGB(222, 207, 182);  // 벽지 무늬
-	info.ColorTable[PAL_HUD]     = RGB(128, 104, 82);   // HUD 바 : 진한 원목
-	info.ColorTable[PAL_BLUE]    = RGB(92, 150, 205);   // 바람 : 파랑
-	info.ColorTable[PAL_RED]     = RGB(205, 70, 70);    // 버튼 : 빨강
-	info.ColorTable[PAL_WOOD]    = RGB(214, 178, 136);  // 원목 : 밝은 나무
-	info.ColorTable[PAL_SUN]     = RGB(250, 214, 110);  // 해 : 노랑
-	info.ColorTable[PAL_CREAM]   = RGB(252, 250, 244);  // 크림색 (창틀·시계판·말풍선)
-	info.srWindow.Right++;                   // SetConsoleScreenBufferInfoEx 는 창을 한 칸씩 줄이는 버릇이 있어 보정한다
+	info.ColorTable[PAL_HUD]     = RGB(128, 104, 82);
+	info.ColorTable[PAL_BLUE]    = RGB(92, 150, 205);   // 바람
+	info.ColorTable[PAL_RED]     = RGB(205, 70, 70);    // 버튼
+	info.ColorTable[PAL_WOOD]    = RGB(214, 178, 136);  // 나무
+	info.ColorTable[PAL_SUN]     = RGB(250, 214, 110);
+	info.ColorTable[PAL_CREAM]   = RGB(252, 250, 244);
+	info.srWindow.Right++;   // 창이 한칸씩 줄어드는 거 보정
 	info.srWindow.Bottom++;
 	SetConsoleScreenBufferInfoEx(h, &info);
 }
 
-// 콘솔을 Alt+Enter 와 같은 전체 화면으로 바꾼다. 이미 전체 화면이거나 바꾸는 데 성공하면 1
-// Windows Terminal 처럼 전체 화면 전환을 지원하지 않는 콘솔이면 0 (그때는 테두리 없는 창으로 대신한다)
+// 전체화면 (성공하면 1)
 static int EnterFullscreen(HANDLE h) {
 	DWORD mode = 0;
 	COORD newSize;
 
 	if (GetConsoleDisplayMode(&mode) && (mode & CONSOLE_FULLSCREEN)) {
-		return 1;   // 이미 전체 화면 (R 로 다시 시작할 때)
+		return 1;
 	}
 	return SetConsoleDisplayMode(h, CONSOLE_FULLSCREEN_MODE, &newSize) ? 1 : 0;
 }
@@ -137,49 +130,48 @@ static int EnterFullscreen(HANDLE h) {
 int InitGame(Game* g){
 
 	memset(g, 0, sizeof(Game));
-	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);   // 콘솔 출력 손잡이
-	SetGamePalette(h);                            //   돌(갈색)·개미(검정)·배경 장식 색 준비
-	int fullscreen = EnterFullscreen(h);          // 0 Alt+Enter 전체 화면으로 시작 (모든 화면의 기준)
+	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+	SetGamePalette(h);
+	int fullscreen = EnterFullscreen(h);
 	if (!fullscreen) {
-		SetConsoleBorderless(1);                  //   전체 화면을 못 쓰는 콘솔이면 테두리 없는 창으로 대신
+		SetConsoleBorderless(1);   // 전체화면 안되면 테두리 없는 창
 	}
-	FitConsoleFont(h);                            //   글꼴을 120 x 36 이 화면에 꽉 차는 크기로 (창 크기를 정하기 전에 해야 한다)
+	FitConsoleFont(h);
 
-	// 콘솔 크기 = 화면에 들어가는 최대 칸 수 (최소 120 x 36). 게임 화면은 그 가운데에 그린다 (FlushBuffer)
+	// 콘솔 크기 정하기 (최소 120 x 36)
 	COORD largest = GetLargestConsoleWindowSize(h);
 	SHORT cols = (largest.X > SCREEN_W) ? largest.X : SCREEN_W;
 	SHORT rows = (largest.Y > SCREEN_H) ? largest.Y : SCREEN_H;
 
 	SMALL_RECT win = { 0, 0, 1, 1 };
-	SetConsoleWindowInfo(h, TRUE, &win);          //1 창을 먼저 아주 작게
+	SetConsoleWindowInfo(h, TRUE, &win);   // 창 먼저 작게
 
 	COORD size = { cols, rows };
-	SetConsoleScreenBufferSize(h, size);          // 2 버퍼를 cols x rows 로 (스크롤 없이 화면과 같은 크기)
+	SetConsoleScreenBufferSize(h, size);
 
 	win.Right = cols - 1;
 	win.Bottom = rows - 1;
-	SetConsoleWindowInfo(h, TRUE, &win);  // 3 창을 버퍼 크기에 맞춤
-	system("cls");                        //   남는 줄을 깨끗하게 (이전 출력이 남지 않도록)
-	ShowScrollBar(GetConsoleWindow(), SB_BOTH, FALSE); // 스크롤할 것이 없는데도 생기는 스크롤바 숨기기 (120칸이 화면 폭에 딱 맞아서 오른쪽 끝 칸을 가린다)
+	SetConsoleWindowInfo(h, TRUE, &win);
+	system("cls");
+	ShowScrollBar(GetConsoleWindow(), SB_BOTH, FALSE); // 스크롤바 숨김
 	if (!fullscreen) {
-		PlaceConsoleWindow(h);            // 4 (테두리 없는 창일 때만) 화면 가운데로
+		PlaceConsoleWindow(h);
 	}
-	HideCursor(); // 깜빡이는 커서 숨기기 (CloseGame 에서 다시 보이게 함)
+	HideCursor();
 	int stage = 1;
 	int flag;
-	
+
 	flag = LoadMap(&g->map,stage);
 	srand((unsigned int)time(NULL));
 	if (flag){
-		// 플레이어 위치 초기화 
-		g->p.y = MAP_H - 2;   // 맨 아래 바닥(#) 바로 위
+		// 플레이어
+		g->p.y = MAP_H - 2;
 		g->p.x = 3;
-		// hp 값 초기화
 		g->p.hp = PLAYER_MAX_HP;
 		g->p.face = 1;
 		g->state = ST_PLAY;
 
-		// 개미 , 낙하물 , 선풍기 초기화 
+		// 맵에서 약병, 선풍기, 버튼 찾기
 		int Count_FANS =0;
 		int Count_BUTTONS =0;
 		for(int y = MAP_H - 1; y >= 0; y--){
@@ -201,23 +193,24 @@ int InitGame(Game* g){
 					Button *b = &g->buttons[Count_BUTTONS];
 					b->x = x;
 					b->y = y;
-					b->fanId = Count_BUTTONS; 
+					b->fanId = Count_BUTTONS;
 					b->pressed = 0;
 					Count_BUTTONS++;
 				}
 			}
 		}
+		// 다 찾은 다음에 칸 막기 (중간에 하면 같은 걸 또 찾음)
 		for (int i = 0; i < Count_BUTTONS; i++) {
-			SetButtonTiles(g, i);   // 찾은 버튼 자리 2 x 2 를 막힌 칸으로 (스캔이 끝난 뒤에 해야 같은 버튼을 또 찾지 않는다)
+			SetButtonTiles(g, i);
 		}
 		for (int i = 0; i < Count_FANS; i++) {
-			SetFanTiles(g, i);      // 찾은 선풍기 자리 5 x 3 을 막힌 칸으로 (스캔이 끝난 뒤에)
+			SetFanTiles(g, i);
 		}
-		// 개미 초기화 :
-		int antInfo[][4] = { //  개미 한 마리 { x, y, left, right }
-			{ 35, 33, 35,  60 },   // 1층 (바닥 y=34 위)
-			{ 30, 22, 30,  65 },   // 2층 (큰 발판 y=23 위)
-			{ 82, 12, 82, 100 },   // 제일 위층 (꼭대기 발판 y=13 위) 
+		// 개미 { x, y, 왼쪽 끝, 오른쪽 끝 }
+		int antInfo[][4] = {
+			{ 35, 33, 35,  60 },   // 1층
+			{ 30, 22, 30,  65 },   // 2층
+			{ 82, 12, 82, 100 },   // 맨 위
 		};
 		int antCount = sizeof(antInfo) / sizeof(antInfo[0]) ;
 
@@ -248,7 +241,7 @@ void UpdateGame(Game* g){
 		g->p.invTick -=1;
 	}
 	if (g->frame >= TIME_LIMIT_TICK) {
-		g->p.hp = 0;    // 제한 시간(TIME_LIMIT_SEC = 30초) 안에 약병에 가지 못하면 즉사 (무적과 상관없이). 아래에서 게임 오버
+		g->p.hp = 0;    // 시간 초과하면 바로 죽음
 	}
 	UpdateButtons(g);
 	UpdateFans(g);
@@ -267,41 +260,40 @@ void UpdateGame(Game* g){
 
 void RunGameLoop(Game *g){
 	while((g->state) == ST_PLAY){
-		DWORD start = GetTickCount(); // 프레임 재기		
+		DWORD start = GetTickCount();
 		ProcessInput(g);
 		if((g->state) == ST_EXIT){
-			break;	
+			break;
 		}
 		UpdateGame(g);
 		Render(g);
 		g->frame++;
-		int elapsed = GetTickCount()-start; // 다시 프레임 재서 몇 프레임 걸렷는지 측정
-		if( (FRAME_MS -elapsed) > 0){ // 50보다 적게 걸리면 
-			Sleep(FRAME_MS -elapsed); // 그 값을 얼림 (실행시간+얼린시간 = 50 프레임이 되야 하므로)
-		}			
+		int elapsed = GetTickCount()-start; // 걸린 시간
+		if( (FRAME_MS -elapsed) > 0){
+			Sleep(FRAME_MS -elapsed); // 50ms 맞추기
+		}
 	}
-	
+
 }
 
 void CloseGame(Game *g){
 
 	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-	CONSOLE_CURSOR_INFO cursor;  // 커서 정보 구조체
-	cursor.dwSize = 20;          // 커서 두께(1~100)
-	cursor.bVisible = TRUE;      // 숨겨 둔 커서를 다시 보이게
+	CONSOLE_CURSOR_INFO cursor;
+	cursor.dwSize = 20;
+	cursor.bVisible = TRUE;      // 커서 다시 보이게
 	SetConsoleCursorInfo(h, &cursor);
 	COORD normalSize;
-	SetConsoleDisplayMode(h, CONSOLE_WINDOWED_MODE, &normalSize); // 전체 화면 끝내기
-	SetConsoleBorderless(0);     // (테두리 없는 창이었다면) 제목 표시줄·테두리 되돌리기
+	SetConsoleDisplayMode(h, CONSOLE_WINDOWED_MODE, &normalSize); // 전체화면 끄기
+	SetConsoleBorderless(0);
 
 	system("cls");
 	printf("게임 종료\n");
-}	
+}
 
 
-// Windows Terminal(탭이 있는 새 터미널) 안에서 실행되면 글꼴·창 크기를 바꿀 수 없어 화면을 꽉 채우지 못한다
-// 그래서 클래식 콘솔(conhost)로 자기 자신을 다시 실행한다. 다시 실행했으면 1, 그대로 진행하면 0 을 반환한다
-// argc, argv : main 의 명령줄. 다시 실행된 게임에는 "--classic" 을 붙여 또 다시 실행하지 않게 한다
+// Windows Terminal에서는 글꼴/창 크기를 못 바꿔서 기본 콘솔(conhost)로 다시 실행
+// 다시 실행했으면 1
 static int RelaunchInClassicConsole(int argc, char* argv[]) {
 	wchar_t conhost[MAX_PATH];
 	wchar_t exePath[MAX_PATH];
@@ -313,24 +305,24 @@ static int RelaunchInClassicConsole(int argc, char* argv[]) {
 
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--classic") == 0) {
-			return 0;   // 이미 다시 실행된 게임이면 그대로 진행 (무한 반복 방지)
+			return 0;   // 이미 다시 실행된 거면 그냥 진행
 		}
 	}
 	if (hwnd != NULL) {
 		GetClassNameW(hwnd, className, 64);
 	}
 	if (lstrcmpW(className, L"ConsoleWindowClass") == 0) {
-		return 0;   // 클래식 콘솔 창이면 그대로 진행 (Windows Terminal 안에서는 보이지 않는 가짜 창이라 이름이 다르다)
+		return 0;   // 원래 기본 콘솔이면 그냥 진행
 	}
 	if (IsDebuggerPresent()) {
-		return 0;   // Visual Studio 디버깅(F5) 중에는 다시 실행하면 디버거가 끊기므로 그대로 진행
+		return 0;   // VS 디버깅 중이면 그냥 진행
 	}
 	if (GetSystemDirectoryW(conhost, MAX_PATH) == 0 || GetModuleFileNameW(NULL, exePath, MAX_PATH) == 0) {
 		return 0;
 	}
 	lstrcatW(conhost, L"\\conhost.exe");
 
-	// 명령줄 : "C:\Windows\System32\conhost.exe" "게임.exe 경로" --classic
+	// "conhost.exe" "게임.exe" --classic
 	lstrcpyW(cmd, L"\"");
 	lstrcatW(cmd, conhost);
 	lstrcatW(cmd, L"\" \"");
@@ -340,7 +332,7 @@ static int RelaunchInClassicConsole(int argc, char* argv[]) {
 	ZeroMemory(&si, sizeof(si));
 	si.cb = sizeof(si);
 	if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-		return 0;   // 실패하면 지금 창에서 그대로 진행
+		return 0;
 	}
 	CloseHandle(pi.hThread);
 	CloseHandle(pi.hProcess);
@@ -349,38 +341,38 @@ static int RelaunchInClassicConsole(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
 
-	int firstRun = 1; // 인트로 판별 용
+	int firstRun = 1; // 처음 실행인지
 	Game g;
 
 	if (RelaunchInClassicConsole(argc, argv)) {
-		return 0;   // 새 클래식 콘솔 창에서 게임이 시작됐으므로 이 창은 끝낸다
+		return 0;
 	}
 	while(1){
-	
-		if (!InitGame(&g)) { 
+
+		if (!InitGame(&g)) {
 			CloseGame(&g); return 0;
 		}
 		if (firstRun){
-			BgmStart(); // 배경 음악 시작 (타이틀부터 계속 반복. 다시 하기를 해도 끊기지 않는다)
-			ShowTitle(); // 타이틀 화면 (아무 키나 누르면 시작)
-			ShowIntro(); // 인트로 표시 
+			BgmStart(); // 배경음악
+			ShowTitle();
+			ShowIntro();
 			firstRun = 0;
 		}
 		g.state = ST_PLAY;
 		RunGameLoop(&g);
 
-		if((g.state) == ST_EXIT){ // 종료 시 
+		if((g.state) == ST_EXIT){
 			break;
 		}
-		if(ShowEnding(&g) == 0){
+		if(ShowEnding(&g) == 0){ // Q 누르면 끝
 			break;
 		}
-		
+
 	}
 	// 게임 종료
-	BgmStop(); // 배경 음악 정지
+	BgmStop();
 	CloseGame(&g);
-	return 0; 
-	 
-}	
+	return 0;
+
+}
 
